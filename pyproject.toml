@@ -44,6 +44,7 @@ dev = [
   "pypdf>=4.0",
   "ruff>=0.6",
   "mypy>=1.11",
+  "types-PyYAML>=6.0",
 ]
 
 [tool.hatch.version]
@@ -51,6 +52,10 @@ path = "src/amethyst/__init__.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/amethyst"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--strict-markers"
 
 [tool.ruff]
 line-length = 88

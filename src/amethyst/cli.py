@@ -1,9 +1,9 @@
 """The Typer application: argument parsing, resolution and exit codes.
 
-Conversion is not wired up yet. Every command resolves its arguments for real
-— format inference, output paths, theme names — and then prints the plan it
-would have executed, so the surface can be exercised and tested before any
-renderer exists.
+Rendering is not wired up yet. Everything before it is real: arguments are
+resolved — format inference, output paths, theme names — the document is
+parsed, and the plan that would have been executed is printed, so the surface
+can be exercised and tested before any renderer exists.
 """
 
 from __future__ import annotations
@@ -19,7 +19,9 @@ from rich.markup import escape
 from rich.table import Table
 
 from amethyst import __version__
+from amethyst.document import Document, load_document
 from amethyst.errors import AmethystError, UsageError
+from amethyst.parse import AssetKind
 
 #: The conventional spelling of "stdin" or "stdout" as a path argument.
 DASH = Path("-")
@@ -178,6 +180,28 @@ def resolve_theme(theme: str) -> str:
     return theme
 
 
+def apply_overrides(
+    document: Document, *, title: str | None, author: str | None
+) -> None:
+    """Let --title and --author win over the frontmatter that declared them."""
+    if title is not None:
+        document.metadata["title"] = title
+    if author is not None:
+        document.metadata["author"] = author
+
+
+def warn_about_missing_assets(document: Document) -> None:
+    """Warn once per reference that points at a file which is not there.
+
+    A missing image is not fatal — the document still converts, with a gap
+    where the picture was — so this warns and continues rather than raising.
+    """
+    for asset in document.missing_assets:
+        noun = "image" if asset.kind is AssetKind.image else "linked file"
+        where = f" (line {asset.line})" if asset.line is not None else ""
+        warn(f"{noun} not found: {asset.reference}{where}")
+
+
 def warn(message: str) -> None:
     """Report something the user should know about but that is not fatal."""
     if not state.quiet:
@@ -289,6 +313,10 @@ def convert(
     if css is not None and resolved_format is not Format.pdf:
         warn("--css applies to PDF output only; ignoring it.")
 
+    document = load_document(None if source == DASH else source)
+    apply_overrides(document, title=title, author=author)
+    warn_about_missing_assets(document)
+
     rows = [
         ("input", "stdin" if source == DASH else str(source)),
         ("output", "stdout" if destination is None else str(destination)),
@@ -297,10 +325,9 @@ def convert(
     ]
     if css is not None and resolved_format is Format.pdf:
         rows.append(("extra css", str(css)))
-    if title is not None:
-        rows.append(("title", title))
-    if author is not None:
-        rows.append(("author", author))
+    rows.append(("title", document.title or "(untitled)"))
+    if document.author is not None:
+        rows.append(("author", document.author))
     rows.append(("toc", f"depth {toc_depth}" if toc else "no"))
     rows.append(("page size", page_size))
     if margin is not None:
