@@ -1,0 +1,60 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "amethyst"
+dynamic = ["version"]
+description = "Turn a Markdown file into a well-typeset PDF or Word document."
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [{ name = "Patrik Repkovsky" }]
+keywords = ["markdown", "pdf", "docx", "typesetting", "cli"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: Console",
+  "Intended Audience :: End Users/Desktop",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Text Processing :: Markup :: Markdown",
+]
+
+dependencies = [
+  "markdown-it-py>=4.0",
+  "mdit-py-plugins>=0.6",
+  "linkify-it-py>=2.2", # hard-required by the gfm-like preset, at render time
+  "pygments>=2.17",
+  "weasyprint>=62",
+  "python-docx>=1.1",
+  "typer>=0.12",
+  "rich>=13.7",
+  "pyyaml>=6.0",
+  "tomli>=2.0; python_version < '3.11'",
+]
+
+[project.scripts]
+amethyst = "amethyst.cli:main"
+
+[dependency-groups]
+dev = [
+  "pytest>=8.0",
+  "pytest-cov>=5.0",
+  "pypdf>=4.0",
+  "ruff>=0.6",
+  "mypy>=1.11",
+]
+
+[tool.hatch.version]
+path = "src/amethyst/__init__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/amethyst"]
+
+[tool.ruff]
+line-length = 88
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
