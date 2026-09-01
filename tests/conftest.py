@@ -1,37 +1,52 @@
-"""Shared fixtures, and the one environment fix the PDF path needs.
+"""Shared fixtures for the whole suite.
 
-On Apple Silicon, Homebrew installs pango's dylibs into /opt/homebrew/lib,
-which is not on the search path of a non-Homebrew interpreter — so ``import
-weasyprint`` fails with ``cannot load library 'libgobject-2.0-0'`` even though
-pango is correctly installed. Setting the fallback path here rather than in the
-shell works because the lookup happens when the library is first opened, not
-when the process starts; verified against weasyprint 69.0.
+There is deliberately no environment fix-up here. Making Pango reachable on
+macOS is the PDF renderer's own job — it repairs the dynamic loader's search
+path just before importing WeasyPrint, because the shell export that would
+otherwise be needed cannot reach the installed console script. Doing it a
+second time here would only hide a regression in the code that ships.
 """
 
 from __future__ import annotations
 
-import os
-import sys
+from functools import cache
 from pathlib import Path
 
 import pytest
 
-HOMEBREW_LIB = "/opt/homebrew/lib"
 FIXTURES = Path(__file__).parent / "fixtures"
 
 
-def _add_homebrew_to_library_path() -> None:
-    if sys.platform != "darwin" or not Path(HOMEBREW_LIB).is_dir():
-        return
-    current = os.environ.get("DYLD_FALLBACK_LIBRARY_PATH", "")
-    entries = current.split(os.pathsep) if current else []
-    if HOMEBREW_LIB not in entries:
-        os.environ["DYLD_FALLBACK_LIBRARY_PATH"] = os.pathsep.join(
-            [*entries, HOMEBREW_LIB]
-        )
+@cache
+def _weasyprint_failure() -> str | None:
+    """Why the PDF pipeline cannot run here, or ``None`` if it can.
+
+    Goes through the renderer's own import so that whatever it does to make
+    the import work is under test rather than assumed. Cached because the
+    answer cannot change within a run and the failure path is an expensive
+    search through the dynamic loader's directories.
+    """
+    from amethyst.errors import AmethystError
+    from amethyst.render.pdf import import_weasyprint
+
+    try:
+        import_weasyprint()
+    except AmethystError as exc:
+        return exc.message
+    return None
 
 
-_add_homebrew_to_library_path()
+@pytest.fixture
+def requires_weasyprint() -> None:
+    """Skip a test needing the PDF pipeline when WeasyPrint will not load.
+
+    A contributor without Pango installed should still be able to run the
+    parse, theme and DOCX tests rather than watch two thirds of the suite fail
+    for a reason that has nothing to do with their change.
+    """
+    failure = _weasyprint_failure()
+    if failure is not None:
+        pytest.skip(failure)
 
 
 @pytest.fixture

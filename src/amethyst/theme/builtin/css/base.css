@@ -1,0 +1,258 @@
+/* Structural CSS for the PDF pipeline.
+ *
+ * Everything here is either layout that does not belong to a theme, or a
+ * default that a theme will later override. A theme compiles to a `:root` block
+ * that goes in front of this file; the custom properties below are the values
+ * it replaces, which keeps this stylesheet readable on its own and keeps the
+ * PDF path working with no theme loaded at all.
+ *
+ * One rule for anything added here: it must render without a WeasyPrint
+ * warning. The renderer forwards WeasyPrint's log to the user, so a property it
+ * does not support is not a silent no-op — it is a line of noise on every
+ * single conversion.
+ */
+
+:root {
+  --font-body: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+  --font-heading: var(--font-body);
+  --font-mono: ui-monospace, "SF Mono", Menlo, "DejaVu Sans Mono", monospace;
+
+  --size-body: 11pt;
+  --size-small: 9.5pt;
+  --leading: 1.45;
+
+  --color-text: #16151a;
+  --color-muted: #5d5a66;
+  --color-accent: #6a3fa0;
+  --color-rule: #d9d6de;
+  --color-fill: #f6f4f8;
+
+  --block-gap: 0.85em;
+  --indent: 1.6em;
+}
+
+/* --- page furniture ---------------------------------------------------- */
+
+/* @page lives in the generated block: its size and margins come from flags,
+   and a paged-media descriptor cannot read a custom property. */
+
+html {
+  font-family: var(--font-body);
+  font-size: var(--size-body);
+  line-height: var(--leading);
+  color: var(--color-text);
+}
+
+body {
+  margin: 0;
+  /* Ragged right. Justified text needs hyphenation to avoid rivers, and
+     hyphenation needs a language declared per document, which nothing sets
+     yet. */
+  text-align: left;
+  orphans: 2;
+  widows: 2;
+}
+
+/* --- headings ---------------------------------------------------------- */
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  font-family: var(--font-heading);
+  font-weight: 600;
+  line-height: 1.2;
+  margin: 1.4em 0 0.5em;
+  /* A heading alone at the foot of a page is the most visible typesetting
+     failure there is, and these two rules are the whole fix. */
+  break-after: avoid;
+  break-inside: avoid;
+}
+
+h1 { font-size: 2em; margin-top: 0; letter-spacing: -0.01em; }
+h2 { font-size: 1.5em; }
+h3 { font-size: 1.22em; }
+h4 { font-size: 1.05em; }
+h5 { font-size: 1em; }
+h6 { font-size: 1em; color: var(--color-muted); }
+
+/* --- flow -------------------------------------------------------------- */
+
+p {
+  margin: 0 0 var(--block-gap);
+}
+
+a {
+  color: var(--color-accent);
+  text-decoration: none;
+}
+
+hr {
+  border: none;
+  border-top: 1px solid var(--color-rule);
+  margin: 1.6em 0;
+}
+
+/* --- lists ------------------------------------------------------------- */
+
+ul,
+ol {
+  margin: 0 0 var(--block-gap);
+  padding-left: var(--indent);
+}
+
+li {
+  margin-bottom: 0.2em;
+}
+
+/* Nested lists sit inside their parent item, so their own outer margin would
+   double the gap the item already has. */
+li > ul,
+li > ol {
+  margin-top: 0.2em;
+  margin-bottom: 0;
+}
+
+/* Task lists carry their own bullet in the checkbox. */
+.contains-task-list {
+  list-style: none;
+  padding-left: 0.2em;
+}
+
+/* The browser default stylesheet lays a checkbox out as a block, which puts
+   every task on two lines with the box alone on the first. */
+.task-list-item-checkbox {
+  display: inline-block;
+  width: 0.72em;
+  height: 0.72em;
+  margin-right: 0.45em;
+  vertical-align: -0.02em;
+  border: 1px solid var(--color-muted);
+  border-radius: 2px;
+}
+
+/* --- definition lists -------------------------------------------------- */
+
+dl {
+  margin: 0 0 var(--block-gap);
+}
+
+dt {
+  font-weight: 600;
+}
+
+dd {
+  margin: 0 0 0.5em var(--indent);
+}
+
+/* --- quotes ------------------------------------------------------------ */
+
+blockquote {
+  margin: 0 0 var(--block-gap);
+  padding-left: 1em;
+  border-left: 2px solid var(--color-rule);
+  color: var(--color-muted);
+}
+
+blockquote > :last-child {
+  margin-bottom: 0;
+}
+
+/* --- code -------------------------------------------------------------- */
+
+code,
+kbd,
+samp {
+  font-family: var(--font-mono);
+  font-size: 0.87em;
+}
+
+:not(pre) > code {
+  background: var(--color-fill);
+  padding: 0.1em 0.28em;
+  border-radius: 3px;
+}
+
+pre {
+  font-family: var(--font-mono);
+  font-size: 0.82em;
+  line-height: 1.4;
+  background: var(--color-fill);
+  border: 1px solid var(--color-rule);
+  border-radius: 4px;
+  padding: 0.7em 0.9em;
+  margin: 0 0 var(--block-gap);
+  /* A page has no horizontal scrollbar: an over-long line has to wrap or it
+     is simply lost off the edge of the paper. */
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+}
+
+pre > code {
+  background: none;
+  padding: 0;
+  font-size: inherit;
+}
+
+/* --- tables ------------------------------------------------------------ */
+
+table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 0 0 var(--block-gap);
+  font-size: var(--size-small);
+}
+
+th,
+td {
+  border: 1px solid var(--color-rule);
+  padding: 0.35em 0.6em;
+  text-align: left;
+  vertical-align: top;
+}
+
+th {
+  background: var(--color-fill);
+  font-weight: 600;
+}
+
+/* A row split across a page break is unreadable; the header repeating is the
+   reason the split is survivable at all. */
+tr {
+  break-inside: avoid;
+}
+
+thead {
+  display: table-header-group;
+}
+
+/* --- figures ----------------------------------------------------------- */
+
+img {
+  max-width: 100%;
+}
+
+/* --- footnotes --------------------------------------------------------- */
+
+.footnotes-sep {
+  margin-top: 2.5em;
+}
+
+.footnotes {
+  font-size: var(--size-small);
+  color: var(--color-muted);
+}
+
+.footnotes p {
+  margin-bottom: 0.35em;
+}
+
+/* Dropped rather than styled. The glyph markdown-it uses for it has no
+   coverage in most serif text fonts, so it sets as a missing-glyph box; and a
+   back-link is a browser affordance that a typeset page does not want, which
+   makes restoring it with a symbol font the wrong repair. */
+.footnote-backref {
+  display: none;
+}

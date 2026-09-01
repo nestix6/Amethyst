@@ -31,12 +31,41 @@ The venv is Python 3.13 with all dependencies installed:
 .venv/bin/python
 ```
 
-⚠️ **Anything that touches WeasyPrint needs this first**, or it fails with
-`OSError: cannot load library 'libgobject-2.0-0'` — even though pango is
-correctly installed. See PLAN.md §4.2.1.
+No `DYLD_FALLBACK_LIBRARY_PATH` export is needed any more: the PDF renderer
+puts Homebrew's lib directory on the loader path itself, just before it imports
+WeasyPrint. Only import `weasyprint` directly — outside Amethyst's own code —
+and you will still need it:
 
 ```sh
 export DYLD_FALLBACK_LIBRARY_PATH=/opt/homebrew/lib
+```
+
+All four of these should be clean before a commit:
+
+```sh
+.venv/bin/python -m pytest -q
+.venv/bin/ruff check src/ tests/
+.venv/bin/ruff format src/ tests/
+.venv/bin/mypy src/amethyst
+```
+
+`uv.lock` is tracked, so run `uv lock` after touching `[project.dependencies]`.
+`uv lock --check` tells you whether it has drifted.
+
+## Looking at the output
+
+The suite proves a PDF is well-formed, not that it looks right — the two
+rendering defects found while building the PDF path were both invisible to it.
+So look at the pages. There is no `pdftoppm` or `pypdfium2` here, and `sips`
+converts only the first page of a PDF, so split it first:
+
+```sh
+.venv/bin/python -c "
+from pypdf import PdfReader, PdfWriter
+for i, page in enumerate(PdfReader('out.pdf').pages):
+    w = PdfWriter(); w.add_page(page); w.write(f'page{i}.pdf')
+"
+for f in page*.pdf; do sips -s format png "$f" --out "${f%.pdf}.png"; done
 ```
 
 ## When the user asks to commit

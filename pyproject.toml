@@ -26,7 +26,7 @@ dependencies = [
   "mdit-py-plugins>=0.6",
   "linkify-it-py>=2.2", # hard-required by the gfm-like preset, at render time
   "pygments>=2.17",
-  "weasyprint>=62",
+  "weasyprint>=69", # URLFetcher; the fetcher it replaces is deprecated
   "python-docx>=1.1",
   "typer>=0.12",
   "rich>=13.7",
@@ -56,6 +56,12 @@ packages = ["src/amethyst"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "--strict-markers"
+
+[[tool.mypy.overrides]]
+# WeasyPrint ships no type information, and it is imported inside a function
+# so that a machine without Pango can still run everything else.
+module = ["weasyprint.*"]
+ignore_missing_imports = true
 
 [tool.ruff]
 line-length = 88

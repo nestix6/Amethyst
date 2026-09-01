@@ -131,8 +131,9 @@ def test_version_and_help_succeed(monkeypatch, capsys):
     assert "amethyst" in capsys.readouterr().out
 
 
-def test_a_convertible_document_exits_zero(monkeypatch, doc):
+def test_a_convertible_document_exits_zero(monkeypatch, doc, requires_weasyprint):
     assert run(monkeypatch, "convert", str(doc), "-o", "out.pdf") == 0
+    assert Path("out.pdf").read_bytes().startswith(b"%PDF-")
 
 
 def test_bad_usage_exits_two(monkeypatch, doc, tmp_path):
@@ -160,8 +161,10 @@ def test_themes_list_prints_the_builtins(monkeypatch, capsys):
 # --- what convert reports -------------------------------------------------
 
 
-def test_convert_reports_the_frontmatter_it_parsed(monkeypatch, doc, capsys):
-    assert run(monkeypatch, "convert", str(doc), "-o", "out.pdf") == 0
+def test_convert_reports_the_frontmatter_it_parsed(
+    monkeypatch, doc, capsys, requires_weasyprint
+):
+    assert run(monkeypatch, "convert", str(doc), "-o", "out.pdf", "--verbose") == 0
     out = capsys.readouterr().out
     assert "A Parsed Title" in out
     assert "Ada Lovelace" in out
@@ -176,6 +179,7 @@ def test_flags_override_the_frontmatter(monkeypatch, doc, capsys):
             str(doc),
             "-f",
             "docx",
+            "--verbose",
             "--title",
             "Flag Title",
             "--author",
@@ -190,14 +194,18 @@ def test_flags_override_the_frontmatter(monkeypatch, doc, capsys):
     assert "notes.docx" in out  # the output path, inferred from the format
 
 
-def test_an_untitled_document_is_reported_as_such(monkeypatch, tmp_path, capsys):
+def test_an_untitled_document_is_reported_as_such(
+    monkeypatch, tmp_path, capsys, requires_weasyprint
+):
     source = tmp_path / "bare.md"
     source.write_text("Just a paragraph.\n", encoding="utf-8")
-    assert run(monkeypatch, "convert", str(source), "-f", "pdf") == 0
+    assert run(monkeypatch, "convert", str(source), "-f", "pdf", "--verbose") == 0
     assert "(untitled)" in capsys.readouterr().out
 
 
-def test_a_missing_image_warns_but_still_exits_zero(monkeypatch, tmp_path, capsys):
+def test_a_missing_image_warns_but_still_exits_zero(
+    monkeypatch, tmp_path, capsys, requires_weasyprint
+):
     source = tmp_path / "notes.md"
     source.write_text("# T\n\n![pic](gone.png)\n", encoding="utf-8")
     assert run(monkeypatch, "convert", str(source), "-f", "pdf") == 0
@@ -207,7 +215,9 @@ def test_a_missing_image_warns_but_still_exits_zero(monkeypatch, tmp_path, capsy
     assert "line 3" in err
 
 
-def test_quiet_suppresses_the_report_and_the_warnings(monkeypatch, tmp_path, capsys):
+def test_quiet_suppresses_the_report_and_the_warnings(
+    monkeypatch, tmp_path, capsys, requires_weasyprint
+):
     source = tmp_path / "notes.md"
     source.write_text("# T\n\n![pic](gone.png)\n", encoding="utf-8")
     assert run(monkeypatch, "convert", str(source), "-f", "pdf", "--quiet") == 0
@@ -223,9 +233,15 @@ def test_css_is_ignored_for_docx_with_a_warning(monkeypatch, doc, tmp_path, caps
     assert "--css applies to PDF output only" in capsys.readouterr().err
 
 
-def test_a_document_can_be_read_from_stdin(monkeypatch, capsys):
+def test_a_document_can_be_read_from_stdin(monkeypatch, capsys, requires_weasyprint):
     code = run(
-        monkeypatch, "convert", "-", "-o", "out.pdf", stdin="# Piped In\n\nBody.\n"
+        monkeypatch,
+        "convert",
+        "-",
+        "-o",
+        "out.pdf",
+        "--verbose",
+        stdin="# Piped In\n\nBody.\n",
     )
     assert code == 0
     out = capsys.readouterr().out
@@ -240,3 +256,78 @@ def test_a_broken_document_is_one_line_not_a_traceback(monkeypatch, tmp_path, ca
     err = capsys.readouterr().err
     assert "frontmatter could not be parsed" in err
     assert "Traceback" not in err
+
+
+# --- writing the document -------------------------------------------------
+
+
+def test_a_pdf_can_be_written_to_stdout(
+    monkeypatch, doc, capsysbinary, requires_weasyprint
+):
+    assert run(monkeypatch, "convert", str(doc), "-f", "pdf", "-o", "-") == 0
+    captured = capsysbinary.readouterr()
+    assert captured.out.startswith(b"%PDF-")
+    assert captured.out.rstrip().endswith(b"%%EOF")
+
+
+def test_nothing_but_the_document_reaches_stdout(
+    monkeypatch, doc, capsysbinary, requires_weasyprint
+):
+    """The whole reason out_console() exists: commentary must not land in the file."""
+    assert (
+        run(monkeypatch, "convert", str(doc), "-f", "pdf", "-o", "-", "--verbose") == 0
+    )
+    captured = capsysbinary.readouterr()
+    assert b"Converting" not in captured.out
+    assert b"wrote" not in captured.out
+    assert b"Converting" in captured.err
+    assert b"wrote stdout" in captured.err
+
+
+def test_an_unwritable_output_is_one_line_not_a_traceback(
+    monkeypatch, doc, tmp_path, capsys, requires_weasyprint
+):
+    destination = tmp_path / "no-such-directory" / "out.pdf"
+    assert run(monkeypatch, "convert", str(doc), "-o", str(destination)) == 1
+    err = capsys.readouterr().err
+    assert "Could not write" in err
+    assert "Traceback" not in err
+
+
+def test_a_successful_conversion_says_what_it_wrote(
+    monkeypatch, doc, capsys, requires_weasyprint
+):
+    assert run(monkeypatch, "convert", str(doc), "-o", "out.pdf") == 0
+    assert "wrote out.pdf (1 page)" in capsys.readouterr().out
+
+
+# --- flags that are accepted but not honoured yet --------------------------
+
+
+def test_an_unbuilt_flag_says_so_rather_than_being_ignored(
+    monkeypatch, doc, capsys, requires_weasyprint
+):
+    code = run(
+        monkeypatch,
+        "convert",
+        str(doc),
+        "-o",
+        "out.pdf",
+        "-t",
+        "github",
+        "--toc",
+        "--highlight-style",
+        "monokai",
+    )
+    assert code == 0
+    err = capsys.readouterr().err
+    assert "themes are not implemented yet" in err
+    assert "--toc is not implemented yet" in err
+    assert "--highlight-style is not implemented yet" in err
+
+
+def test_the_default_theme_and_style_pass_without_comment(
+    monkeypatch, doc, capsys, requires_weasyprint
+):
+    assert run(monkeypatch, "convert", str(doc), "-o", "out.pdf") == 0
+    assert "not implemented yet" not in capsys.readouterr().err
