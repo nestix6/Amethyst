@@ -1,10 +1,11 @@
 /* Structural CSS for the PDF pipeline.
  *
  * Everything here is either layout that does not belong to a theme, or a
- * default that a theme will later override. A theme compiles to a `:root` block
- * that goes in front of this file; the custom properties below are the values
- * it replaces, which keeps this stylesheet readable on its own and keeps the
- * PDF path working with no theme loaded at all.
+ * default that a theme overrides. A theme compiles to a `:root` block appended
+ * after this file — after, because two `:root` blocks have the same specificity
+ * and the later one wins. The custom properties below are the values it
+ * replaces, which keeps this stylesheet readable on its own and keeps the PDF
+ * path working with no theme loaded at all.
  *
  * One rule for anything added here: it must render without a WeasyPrint
  * warning. The renderer forwards WeasyPrint's log to the user, so a property it
@@ -20,6 +21,15 @@
   --size-body: 11pt;
   --size-small: 9.5pt;
   --leading: 1.45;
+  --weight-heading: 600;
+
+  /* Heading sizes, as multiples of the body size. */
+  --size-h1: 2em;
+  --size-h2: 1.5em;
+  --size-h3: 1.22em;
+  --size-h4: 1.05em;
+  --size-h5: 1em;
+  --size-h6: 1em;
 
   --color-text: #16151a;
   --color-muted: #5d5a66;
@@ -33,8 +43,9 @@
 
 /* --- page furniture ---------------------------------------------------- */
 
-/* @page lives in the generated block: its size and margins come from flags,
-   and a paged-media descriptor cannot read a custom property. */
+/* @page lives in the generated block. Its size and margins come from the theme
+   and the flags, and a paged-media descriptor cannot read a custom property
+   anyway. */
 
 html {
   font-family: var(--font-body);
@@ -62,7 +73,7 @@ h4,
 h5,
 h6 {
   font-family: var(--font-heading);
-  font-weight: 600;
+  font-weight: var(--weight-heading);
   line-height: 1.2;
   margin: 1.4em 0 0.5em;
   /* A heading alone at the foot of a page is the most visible typesetting
@@ -71,12 +82,12 @@ h6 {
   break-inside: avoid;
 }
 
-h1 { font-size: 2em; margin-top: 0; letter-spacing: -0.01em; }
-h2 { font-size: 1.5em; }
-h3 { font-size: 1.22em; }
-h4 { font-size: 1.05em; }
-h5 { font-size: 1em; }
-h6 { font-size: 1em; color: var(--color-muted); }
+h1 { font-size: var(--size-h1); margin-top: 0; letter-spacing: -0.01em; }
+h2 { font-size: var(--size-h2); }
+h3 { font-size: var(--size-h3); }
+h4 { font-size: var(--size-h4); }
+h5 { font-size: var(--size-h5); }
+h6 { font-size: var(--size-h6); color: var(--color-muted); }
 
 /* --- flow -------------------------------------------------------------- */
 

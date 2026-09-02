@@ -25,18 +25,21 @@ from amethyst import __version__
 from amethyst.document import Document, load_document
 from amethyst.errors import AmethystError, RenderError, UsageError
 from amethyst.parse import AssetKind
-from amethyst.render import DEFAULT_MARGIN, DEFAULT_PAGE_SIZE, RenderOptions, render_pdf
+from amethyst.render import RenderOptions, render_pdf
+from amethyst.theme import (
+    DEFAULT_THEME,
+    builtin_names,
+    load_theme,
+    locate_theme,
+    read_theme_text,
+)
 
 #: The conventional spelling of "stdin" or "stdout" as a path argument.
 DASH = Path("-")
 
-#: Known theme names. Replaced by a scan of ``theme/builtin`` once it exists.
-BUILTIN_THEMES = ("default", "github", "academic")
-
-#: The theme and highlighting style used when the user names neither. Held as
-#: constants because the flags need them twice: once as the default, and once
-#: to notice that the user asked for something other than it.
-DEFAULT_THEME = "default"
+#: The highlighting style used when the user names none. Held as a constant
+#: because the flag needs it twice: once as the default, and once to notice
+#: that the user asked for something other than it.
 DEFAULT_HIGHLIGHT_STYLE = "default"
 
 #: The config file ``amethyst init`` writes into the working directory.
@@ -178,19 +181,9 @@ def resolve_theme(theme: str) -> str:
     Only existence is checked here, so the failures are ``UsageError``. Reading
     and validating the theme happens later and raises ``ThemeError`` — a theme
     that is present but broken is a different problem from one that was never
-    named correctly.
+    named correctly, and the two exit differently.
     """
-    candidate = Path(theme)
-    if candidate.suffix.lower() == ".toml" or candidate.parent != Path("."):
-        if not candidate.is_file():
-            raise UsageError(f"No theme file at {theme}.")
-        return str(candidate)
-    if theme not in BUILTIN_THEMES:
-        raise UsageError(
-            f"Unknown theme {theme!r}.",
-            hint=f"Builtin themes: {', '.join(BUILTIN_THEMES)}.",
-        )
-    return theme
+    return locate_theme(theme)
 
 
 def apply_overrides(
@@ -262,15 +255,13 @@ def report_written(destination: Path | None, pages: int | None) -> None:
     out_console().print(f"wrote {escape(where)}{detail}")
 
 
-def warn_about_unbuilt_flags(*, theme: str, toc: bool, highlight_style: str) -> None:
+def warn_about_unbuilt_flags(*, toc: bool, highlight_style: str) -> None:
     """Say so when a flag was accepted but cannot be honoured yet.
 
     These disappear as the features behind them land. Until then, quietly
     ignoring a flag the user went out of their way to pass is the worse
     failure: the output looks wrong and nothing explains why.
     """
-    if theme != DEFAULT_THEME:
-        warn(f"themes are not implemented yet; {theme} will look like the default.")
     if toc:
         warn("--toc is not implemented yet; the document will have no contents.")
     if highlight_style != DEFAULT_HIGHLIGHT_STYLE:
@@ -360,11 +351,20 @@ def convert(
         str | None, typer.Option("--author", help="Override the frontmatter author.")
     ] = None,
     page_size: Annotated[
-        str, typer.Option("--page-size", help="A4, Letter, or a custom size.")
-    ] = DEFAULT_PAGE_SIZE,
+        str | None,
+        typer.Option(
+            "--page-size",
+            show_default="the theme's",
+            help="A4, Letter, or a custom size.",
+        ),
+    ] = None,
     margin: Annotated[
         str | None,
-        typer.Option("--margin", help='CSS-style margin, e.g. "2cm" or "2cm 2.5cm".'),
+        typer.Option(
+            "--margin",
+            show_default="the theme's",
+            help='CSS-style margin, e.g. "2cm" or "2cm 2.5cm".',
+        ),
     ] = None,
     no_page_numbers: Annotated[
         bool, typer.Option("--no-page-numbers", help="Suppress footer page numbers.")
@@ -394,15 +394,16 @@ def convert(
 
     if css is not None and resolved_format is not Format.pdf:
         warn("--css applies to PDF output only; ignoring it.")
-    warn_about_unbuilt_flags(
-        theme=resolved_theme, toc=toc, highlight_style=highlight_style
-    )
+    warn_about_unbuilt_flags(toc=toc, highlight_style=highlight_style)
+
+    # A flag that names page geometry overrides the theme that declares it,
+    # which leaves the theme as the one thing a renderer has to be handed.
+    loaded_theme = load_theme(resolved_theme).with_page(size=page_size, margin=margin)
 
     document = load_document(None if source == DASH else source)
     apply_overrides(document, title=title, author=author)
     warn_about_missing_assets(document)
 
-    resolved_margin = margin if margin is not None else DEFAULT_MARGIN
     rows = [
         ("input", "stdin" if source == DASH else str(source)),
         ("output", "stdout" if destination is None else str(destination)),
@@ -415,8 +416,8 @@ def convert(
     if document.author is not None:
         rows.append(("author", document.author))
     rows.append(("toc", f"depth {toc_depth}" if toc else "no"))
-    rows.append(("page size", page_size))
-    rows.append(("margin", resolved_margin))
+    rows.append(("page size", loaded_theme.page.size))
+    rows.append(("margin", loaded_theme.page.margin))
     rows.append(("page numbers", "no" if no_page_numbers else "yes"))
     rows.append(("highlighting", highlight_style))
     if resolved_format is Format.pdf:
@@ -432,8 +433,7 @@ def convert(
     result = render_pdf(
         document,
         RenderOptions(
-            page_size=page_size,
-            margin=resolved_margin,
+            theme=loaded_theme,
             extra_css=css,
             page_numbers=not no_page_numbers,
             warn=warn,
@@ -446,8 +446,12 @@ def convert(
 @themes_app.command("list")
 def themes_list() -> None:
     """List the builtin themes."""
-    for name in BUILTIN_THEMES:
-        console.print(name)
+    table = Table(show_header=False, box=None, padding=(0, 2, 0, 0))
+    table.add_column(style="cyan", no_wrap=True)
+    table.add_column(overflow="fold")
+    for name in builtin_names():
+        table.add_row(name, escape(load_theme(name).description))
+    console.print(table)
 
 
 @themes_app.command("show")
@@ -455,8 +459,16 @@ def themes_show(
     name: Annotated[str, typer.Argument(metavar="NAME", help="Builtin theme name.")],
 ) -> None:
     """Print a theme's TOML, ready to copy and edit."""
-    resolved = resolve_theme(name)
-    report_unbuilt("Would print the TOML for:", [("theme", resolved)])
+    # Printed raw: this is a file meant to be copied back out, so Rich must not
+    # touch it. Markup off, because a colour written as [#6a3fa0] is a style tag
+    # to Rich and a value to everyone else; soft wrapping on, because folding a
+    # long line at the terminal width would put a newline inside the TOML.
+    console.print(
+        read_theme_text(resolve_theme(name)),
+        markup=False,
+        highlight=False,
+        soft_wrap=True,
+    )
 
 
 @app.command()

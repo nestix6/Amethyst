@@ -16,13 +16,8 @@ from amethyst.document import Document
 from amethyst.errors import RenderError
 from amethyst.parse import build_parser
 from amethyst.render.base import RenderOptions
-
-#: The footer's own styling, spelled out rather than taken from a custom
-#: property: a page margin box sits outside the document tree, so it inherits
-#: nothing from :root. The theme layer will emit these from its own values.
-FOOTER_FONT = '"Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif'
-FOOTER_SIZE = "9pt"
-FOOTER_COLOR = "#5d5a66"
+from amethyst.theme import base_css
+from amethyst.theme.to_css import page_css, root_css
 
 #: Shown in the PDF's title bar when the document declares nothing better.
 FALLBACK_TITLE = "Untitled"
@@ -62,34 +57,20 @@ def render_body(document: Document) -> str:
 
 
 def stylesheets(options: RenderOptions) -> list[str]:
-    """The stylesheets to inline, in cascade order — last one wins."""
-    from amethyst.theme import base_css
+    """The stylesheets to inline, in cascade order — last one wins.
 
-    sheets = [base_css(), page_css(options)]
+    The theme goes after the structural sheet rather than before it: both
+    declare ``:root``, both at the same specificity, so the one that wins is
+    simply the one that comes second.
+    """
+    sheets = [
+        base_css(),
+        root_css(options.theme),
+        page_css(options.theme, page_numbers=options.page_numbers),
+    ]
     if options.extra_css is not None:
         sheets.append(read_css(options.extra_css))
     return sheets
-
-
-def page_css(options: RenderOptions) -> str:
-    """The paged-media block: sheet size, margins and the page number.
-
-    Generated rather than written into ``base.css`` because two of the three
-    come from flags, and because ``size`` is an at-rule descriptor — it cannot
-    read a custom property the way an ordinary declaration can.
-    """
-    lines = ["@page {", f"  size: {options.page_size};", f"  margin: {options.margin};"]
-    if options.page_numbers:
-        lines += [
-            "  @bottom-center {",
-            "    content: counter(page);",
-            f"    font-family: {FOOTER_FONT};",
-            f"    font-size: {FOOTER_SIZE};",
-            f"    color: {FOOTER_COLOR};",
-            "  }",
-        ]
-    lines += ["}", ""]
-    return "\n".join(lines)
 
 
 def read_css(path: Path) -> str:

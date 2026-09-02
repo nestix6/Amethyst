@@ -1,0 +1,40 @@
+# Amethyst's default theme.
+#
+# Copy this file, change what you want and pass it with -t path/to/theme.toml.
+# Anything you leave out is taken from here, so a theme can be as short as one
+# section — or one line.
+
+description = "A serif text face, roomy leading and a violet accent."
+
+[fonts]
+# Most-preferred family first; the last one should be a generic family so
+# there is always something to fall back to.
+body = ["Iowan Old Style", "Palatino Linotype", "Palatino", "Georgia", "serif"]
+heading = ["Iowan Old Style", "Palatino Linotype", "Palatino", "Georgia", "serif"]
+mono = ["ui-monospace", "SF Mono", "Menlo", "DejaVu Sans Mono", "monospace"]
+
+[type]
+# The two absolute sizes are points. Everything else on this page is a
+# multiple of `size`, so changing it alone rescales the whole document.
+size = 11
+small = 9.5
+line_height = 1.45
+heading_weight = 600
+# h1 to h6.
+headings = [2, 1.5, 1.22, 1.05, 1, 1]
+
+[colors]
+text = "#16151a"    # body text
+muted = "#5d5a66"   # footnotes, page numbers, quoted text
+accent = "#6a3fa0"  # links
+rule = "#d9d6de"    # borders and horizontal rules
+fill = "#f6f4f8"    # code and table-header backgrounds
+
+[spacing]
+# Multiples of the body size.
+block = 0.85   # the gap after a paragraph, list, table or code block
+indent = 1.6   # how far a list or a definition is indented
+
+[page]
+size = "A4"
+margin = "2cm"

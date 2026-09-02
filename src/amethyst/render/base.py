@@ -9,20 +9,18 @@ change to everything that calls a renderer.
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol
 
 from amethyst.document import Document
+from amethyst.theme import Theme, default_theme
 
 #: How a renderer reports something the user should know but that is not fatal
 #: — an image it could not load, a construct it had to approximate. Renderers
 #: are given this rather than printing, so nothing in this package has an
 #: opinion about where output goes or whether --quiet was passed.
 Warn = Callable[[str], None]
-
-DEFAULT_PAGE_SIZE = "A4"
-DEFAULT_MARGIN = "2cm"
 
 
 def discard(message: str) -> None:
@@ -34,11 +32,13 @@ class RenderOptions:
     """Everything a renderer needs that is not part of the document itself.
 
     These are already resolved: the CLI has merged flags over defaults, so a
-    renderer never has to reason about what was and was not passed.
+    renderer never has to reason about what was and was not passed. Page
+    geometry is part of the theme rather than a field here — a flag that
+    overrides it does so by handing over an overridden theme, which leaves one
+    place for a renderer to read the sheet size from.
     """
 
-    page_size: str = DEFAULT_PAGE_SIZE
-    margin: str = DEFAULT_MARGIN
+    theme: Theme = field(default_factory=default_theme)
     #: Extra stylesheet, appended after everything else so it wins. PDF only.
     extra_css: Path | None = None
     page_numbers: bool = True

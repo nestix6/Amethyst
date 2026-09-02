@@ -29,7 +29,12 @@ The venv is Python 3.13 with all dependencies installed:
 
 ```sh
 .venv/bin/python
+.venv/bin/amethyst          # the CLI itself, or: .venv/bin/python -m amethyst
 ```
+
+`amethyst` is only on `PATH` in a shell with the venv activated, which a tool
+call does not have. A bare `amethyst ...` there fails as "command not found",
+which looks like a broken install and is not one.
 
 No `DYLD_FALLBACK_LIBRARY_PATH` export is needed any more: the PDF renderer
 puts Homebrew's lib directory on the loader path itself, just before it imports

@@ -25,6 +25,7 @@ from amethyst.cli import (
     resolve_theme,
 )
 from amethyst.errors import UsageError
+from amethyst.theme import DEFAULT_THEME, builtin_names, load_theme
 
 DOC = """---
 title: A Parsed Title
@@ -153,9 +154,39 @@ def test_init_refuses_to_overwrite_an_existing_config(monkeypatch, tmp_path):
     assert run(monkeypatch, "init") == 2
 
 
-def test_themes_list_prints_the_builtins(monkeypatch, capsys):
+def test_themes_list_names_and_describes_the_builtins(monkeypatch, capsys):
     assert run(monkeypatch, "themes", "list") == 0
-    assert capsys.readouterr().out.split() == list(cli.BUILTIN_THEMES)
+    out = capsys.readouterr().out
+    for name in builtin_names():
+        assert name in out
+    assert load_theme(DEFAULT_THEME).description in out
+
+
+def test_themes_show_prints_the_toml_it_would_be_copied_from(monkeypatch, capsys):
+    assert run(monkeypatch, "themes", "show", DEFAULT_THEME) == 0
+    out = capsys.readouterr().out
+    assert "[fonts]" in out
+    # Rich's markup is off for this: a hex colour is a style tag otherwise, and
+    # the copy the user pastes back would be missing the value.
+    assert "#6a3fa0" in out
+
+
+def test_what_themes_show_prints_loads_back_as_a_theme(monkeypatch, capsys, tmp_path):
+    """The command exists to be copied out of, so the copy has to work.
+
+    At a narrow width too: Rich folds a long line to the terminal, and a fold
+    inside a font stack would hand the user a file that no longer parses.
+    """
+    monkeypatch.setenv("COLUMNS", "40")
+    assert run(monkeypatch, "themes", "show", DEFAULT_THEME) == 0
+
+    copied = tmp_path / "copied.toml"
+    copied.write_text(capsys.readouterr().out, encoding="utf-8")
+    assert load_theme(str(copied)).fonts == load_theme(DEFAULT_THEME).fonts
+
+
+def test_themes_show_refuses_a_theme_that_is_not_there(monkeypatch):
+    assert run(monkeypatch, "themes", "show", "nope") == 2
 
 
 # --- what convert reports -------------------------------------------------
@@ -313,21 +344,71 @@ def test_an_unbuilt_flag_says_so_rather_than_being_ignored(
         str(doc),
         "-o",
         "out.pdf",
-        "-t",
-        "github",
         "--toc",
         "--highlight-style",
         "monokai",
     )
     assert code == 0
     err = capsys.readouterr().err
-    assert "themes are not implemented yet" in err
     assert "--toc is not implemented yet" in err
     assert "--highlight-style is not implemented yet" in err
 
 
-def test_the_default_theme_and_style_pass_without_comment(
+def test_the_default_style_passes_without_comment(
     monkeypatch, doc, capsys, requires_weasyprint
 ):
     assert run(monkeypatch, "convert", str(doc), "-o", "out.pdf") == 0
     assert "not implemented yet" not in capsys.readouterr().err
+
+
+# --- themes, once they are loaded -----------------------------------------
+
+
+def test_a_theme_that_is_found_but_broken_is_a_conversion_failure(
+    monkeypatch, doc, tmp_path, capsys
+):
+    """The other half of the split: not-there is usage, unreadable is not."""
+    theme = tmp_path / "broken.toml"
+    theme.write_text('[colors]\naccent = "not a colour"\n', encoding="utf-8")
+    assert run(monkeypatch, "convert", str(doc), "-f", "pdf", "-t", str(theme)) == 1
+    assert "colors.accent" in capsys.readouterr().err
+
+
+def test_a_theme_changes_the_document_it_renders(
+    monkeypatch, doc, tmp_path, requires_weasyprint
+):
+    theme = tmp_path / "loud.toml"
+    theme.write_text('[colors]\naccent = "#c00"\n', encoding="utf-8")
+    assert run(monkeypatch, "convert", str(doc), "-o", "out.pdf", "-t", str(theme)) == 0
+    assert Path("out.pdf").read_bytes().startswith(b"%PDF-")
+
+
+def test_page_geometry_flags_override_the_theme(
+    monkeypatch, doc, capsys, requires_weasyprint
+):
+    code = run(
+        monkeypatch,
+        "convert",
+        str(doc),
+        "-o",
+        "out.pdf",
+        "--page-size",
+        "Letter",
+        "--margin",
+        "3cm",
+        "--verbose",
+    )
+    assert code == 0
+    out = capsys.readouterr().out
+    assert "Letter" in out
+    assert "3cm" in out
+
+
+def test_page_geometry_falls_back_to_the_theme(
+    monkeypatch, doc, capsys, requires_weasyprint
+):
+    assert run(monkeypatch, "convert", str(doc), "-o", "out.pdf", "--verbose") == 0
+    out = capsys.readouterr().out
+    theme = load_theme(DEFAULT_THEME)
+    assert theme.page.size in out
+    assert theme.page.margin in out

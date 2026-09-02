@@ -19,13 +19,14 @@ from pypdf import PdfReader
 from amethyst.document import Document, load_document
 from amethyst.errors import MissingDependencyError, RenderError
 from amethyst.render import RenderOptions, render_html, render_pdf
-from amethyst.render.html import page_css
 from amethyst.render.pdf import (
     DYLD_FALLBACK_PATH,
     _add_homebrew_libraries_to_search_path,
     _dependency_error,
     local_only_fetcher,
 )
+from amethyst.theme import default_theme
+from amethyst.theme.to_css import page_css
 
 #: A4 and Letter in PDF points, to a whole number.
 A4_POINTS = (595, 842)
@@ -34,6 +35,11 @@ LETTER_POINTS = (612, 792)
 
 def parse(text: str, base_dir: Path | None = None) -> Document:
     return Document.from_markdown(text, base_dir=base_dir or Path.cwd())
+
+
+def paged(**geometry: str) -> RenderOptions:
+    """Options whose theme carries the page geometry a flag would override."""
+    return RenderOptions(theme=default_theme().with_page(**geometry))
 
 
 def read_pdf(data: bytes) -> PdfReader:
@@ -68,15 +74,15 @@ def test_a_document_with_no_title_still_gets_one():
     assert "<title>Untitled</title>" in render_html(parse("Body.\n"), RenderOptions())
 
 
-def test_the_page_block_follows_the_options():
-    css = page_css(RenderOptions(page_size="Letter", margin="3cm 2cm"))
+def test_the_page_block_follows_the_theme():
+    css = page_css(default_theme().with_page(size="Letter", margin="3cm 2cm"))
     assert "size: Letter;" in css
     assert "margin: 3cm 2cm;" in css
     assert "counter(page)" in css
 
 
 def test_page_numbers_can_be_left_out():
-    assert "counter(page)" not in page_css(RenderOptions(page_numbers=False))
+    assert "counter(page)" not in page_css(default_theme(), page_numbers=False)
 
 
 def test_extra_css_is_appended_after_everything_else(tmp_path):
@@ -137,7 +143,7 @@ def test_headings_become_a_nested_outline(kitchen_sink, requires_weasyprint):
 
 def test_the_page_size_is_honoured(requires_weasyprint):
     def size(page_size: str) -> tuple[int, int]:
-        result = render_pdf(parse("Body.\n"), RenderOptions(page_size=page_size))
+        result = render_pdf(parse("Body.\n"), paged(size=page_size))
         box = read_pdf(result.data).pages[0].mediabox
         return round(float(box.width)), round(float(box.height))
 
@@ -148,8 +154,8 @@ def test_the_page_size_is_honoured(requires_weasyprint):
 def test_the_margin_is_honoured(requires_weasyprint):
     """Measured by its consequence: a wider margin is a shorter column."""
     body = "word " * 900
-    narrow = render_pdf(parse(body), RenderOptions(margin="1cm"))
-    wide = render_pdf(parse(body), RenderOptions(margin="5cm"))
+    narrow = render_pdf(parse(body), paged(margin="1cm"))
+    wide = render_pdf(parse(body), paged(margin="5cm"))
     assert wide.pages > narrow.pages
 
 

@@ -9,20 +9,11 @@ document is the theme they share, not a common renderer.
 
 from __future__ import annotations
 
-from amethyst.render.base import (
-    DEFAULT_MARGIN,
-    DEFAULT_PAGE_SIZE,
-    Renderer,
-    RenderOptions,
-    RenderResult,
-    Warn,
-)
+from amethyst.render.base import Renderer, RenderOptions, RenderResult, Warn
 from amethyst.render.html import render_html
 from amethyst.render.pdf import render_pdf
 
 __all__ = [
-    "DEFAULT_MARGIN",
-    "DEFAULT_PAGE_SIZE",
     "RenderOptions",
     "RenderResult",
     "Renderer",
