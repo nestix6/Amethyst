@@ -20,6 +20,7 @@
 
   --size-body: 11pt;
   --size-small: 9.5pt;
+  --size-code: 0.85em;
   --leading: 1.45;
   --weight-heading: 600;
 
@@ -177,7 +178,7 @@ code,
 kbd,
 samp {
   font-family: var(--font-mono);
-  font-size: 0.87em;
+  font-size: var(--size-code);
 }
 
 :not(pre) > code {
@@ -188,7 +189,7 @@ samp {
 
 pre {
   font-family: var(--font-mono);
-  font-size: 0.82em;
+  font-size: var(--size-code);
   line-height: 1.4;
   background: var(--color-fill);
   border: 1px solid var(--color-rule);

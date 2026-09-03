@@ -2,8 +2,8 @@
 
 A theme is what keeps the two output formats looking like the same document.
 It is a small TOML file, and it compiles two ways: to the CSS custom properties
-``base.css`` reads, and — once the Word renderer lands — to a set of Word style
-definitions. Neither renderer holds an opinion about a font or a colour.
+``base.css`` reads, and to the style definitions the Word file carries. Neither
+renderer holds an opinion about a font or a colour.
 
 Anything a theme leaves out is filled in from the builtin ``default``, so a
 custom theme can be three lines that change the accent colour and nothing else.
@@ -14,7 +14,9 @@ Sizes are declared as bare numbers rather than CSS lengths on purpose. The two
 that are absolute — the body and small text sizes — are points, because that is
 what print measures in and what Word wants; everything else is a multiple of
 the body size, so a theme scales as a whole and neither compiler has to parse a
-unit out of a string.
+unit out of a string. Page geometry is the exception, and is CSS: the PDF hands
+it straight to a paged-media descriptor, and the Word side reads what it can of
+it and says so when it cannot.
 """
 
 from __future__ import annotations
@@ -77,6 +79,11 @@ class Type:
     size: float
     #: Footnotes, table cells and page furniture, in points.
     small: float
+    #: Code, as a multiple of the body size. Relative rather than absolute so
+    #: that code sits with the prose around it however the document is scaled
+    #: — and declared once here because both compilers need it, and a Word
+    #: style cannot read it off the stylesheet.
+    code: float
     #: Line height, as a multiple of the font size.
     line_height: float
     #: CSS font weight for headings, 100–900.
@@ -329,6 +336,7 @@ def _build(
         type=Type(
             size=_positive(data, "type", "size", source),
             small=_positive(data, "type", "small", source),
+            code=_positive(data, "type", "code", source),
             line_height=_positive(data, "type", "line_height", source),
             heading_weight=_weight(data, "type", "heading_weight", source),
             headings=_scale(data, "type", "headings", source),

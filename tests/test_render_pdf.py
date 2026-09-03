@@ -85,6 +85,39 @@ def test_page_numbers_can_be_left_out():
     assert "counter(page)" not in page_css(default_theme(), page_numbers=False)
 
 
+def test_an_ordered_list_starts_where_the_author_said():
+    """WeasyPrint 69 does not read <ol start>, so the counter is set in CSS.
+
+    Checked against WeasyPrint with none of Amethyst's stylesheet loaded, so
+    the gap is the renderer's rather than something base.css does. Without
+    this the Word file numbers the list from four and the PDF from one.
+    """
+    html = render_html(parse("Text:\n\n4. four\n5. five\n"), RenderOptions())
+    assert '<ol start="4" style="counter-reset: list-item 3">' in html
+
+
+def test_a_list_that_starts_at_one_gets_no_counter_of_its_own():
+    html = render_html(parse("1. one\n2. two\n"), RenderOptions())
+    assert "<ol>" in html
+
+
+def test_rendering_leaves_the_document_tokens_as_it_found_them():
+    """The Word renderer walks the same tokens, and wants no CSS on them."""
+    document = parse("4. four\n")
+    render_html(document, RenderOptions())
+    render_html(document, RenderOptions())
+    listing = next(
+        token for token in document.tokens if token.type == "ordered_list_open"
+    )
+    assert listing.attrs == {"start": 4}
+
+
+def test_the_page_numbering_of_a_started_list_reaches_the_pdf(requires_weasyprint):
+    text = pdf_text(render_pdf(parse("Text:\n\n4. four\n5. five\n"), paged()).data)
+    assert "4." in text
+    assert "5." in text
+
+
 def test_extra_css_is_appended_after_everything_else(tmp_path):
     extra = tmp_path / "extra.css"
     extra.write_text("p { color: rebeccapurple }\n", encoding="utf-8")

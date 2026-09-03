@@ -36,6 +36,7 @@ def root_css(theme: Theme) -> str:
         ("", ""),
         ("size-body", points(type_.size)),
         ("size-small", points(type_.small)),
+        ("size-code", multiple(type_.code)),
         ("leading", number(type_.line_height)),
         ("weight-heading", str(type_.heading_weight)),
         ("", ""),

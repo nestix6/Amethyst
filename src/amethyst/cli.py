@@ -1,11 +1,11 @@
 """The Typer application: argument parsing, resolution and exit codes.
 
-PDF conversion runs for real here; DOCX still reports the plan it would have
-executed. The one thing worth knowing about this module is that the document
-and the commentary can both end up on stdout: ``-o -`` writes the PDF there,
-and a progress line printed alongside it would land inside the file. So every
-human-readable line goes through ``out_console()``, which steps aside to stderr
-when stdout belongs to the document.
+Both formats convert for real here. The one thing worth knowing about this
+module is that the document and the commentary can both end up on stdout:
+``-o -`` writes the document there, and a progress line printed alongside it
+would land inside the file. So every human-readable line goes through
+``out_console()``, which steps aside to stderr when stdout belongs to the
+document.
 """
 
 from __future__ import annotations
@@ -25,7 +25,7 @@ from amethyst import __version__
 from amethyst.document import Document, load_document
 from amethyst.errors import AmethystError, RenderError, UsageError
 from amethyst.parse import AssetKind
-from amethyst.render import RenderOptions, render_pdf
+from amethyst.render import RenderOptions, render_docx, render_pdf
 from amethyst.theme import (
     DEFAULT_THEME,
     builtin_names,
@@ -423,14 +423,11 @@ def convert(
     if resolved_format is Format.pdf:
         rows.append(("pdf engine", pdf_engine.value))
 
-    if resolved_format is Format.docx:
-        report_unbuilt("Would convert:", rows)
-        return
-
     if state.verbose:
         report("Converting:", rows)
 
-    result = render_pdf(
+    render = render_pdf if resolved_format is Format.pdf else render_docx
+    result = render(
         document,
         RenderOptions(
             theme=loaded_theme,

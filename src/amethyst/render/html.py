@@ -9,8 +9,14 @@ private helper inside the PDF renderer.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from html import escape
 from pathlib import Path
+from typing import Any, cast
+
+from markdown_it.renderer import RendererHTML
+from markdown_it.token import Token
+from markdown_it.utils import EnvType, OptionsDict
 
 from amethyst.document import Document
 from amethyst.errors import RenderError
@@ -49,11 +55,54 @@ def render_body(document: Document) -> str:
     declares them.
     """
     md = build_parser()
+    # The parser's renderer is the HTML one, which the protocol the attribute
+    # is typed as does not say; the rules table is on the concrete class.
+    renderer = cast(RendererHTML, md.renderer)
+    # markdown-it types its rules table as holding bound methods, which a
+    # replacement rule is not and never was; the table itself takes any
+    # callable of the right shape.
+    rules: dict[str, Any] = renderer.rules
+    rules["ordered_list_open"] = _ordered_list_rule(renderer)
     # The environment the frontmatter and footnote plugins filled during
     # parsing is not needed to render: the only thing the render rules read
     # from it is an optional id prefix for footnote anchors, which a
     # single-document pipeline has no use for.
-    return md.renderer.render(document.tokens, md.options, {}).rstrip("\n")
+    return renderer.render(document.tokens, md.options, {}).rstrip("\n")
+
+
+def _ordered_list_rule(renderer: RendererHTML) -> Callable[..., str]:
+    """Make a list start where the author said, rather than always at one.
+
+    ``4. four`` opens a list numbered from four, and markdown-it writes that
+    out as ``<ol start="4">`` — which WeasyPrint 69 does not read. Verified
+    against WeasyPrint on its own, with none of Amethyst's CSS loaded, so it
+    is the renderer and not the stylesheet. Setting the list-item counter
+    directly does work, and is what this adds.
+
+    The attribute is put on for the length of one call and taken off again:
+    the token stream belongs to the document, which the Word renderer walks
+    afterwards and has no use for a CSS declaration.
+    """
+
+    def ordered_list_open(
+        tokens: list[Token],
+        index: int,
+        options: OptionsDict,
+        env: EnvType,
+    ) -> str:
+        token = tokens[index]
+        start = token.attrGet("start")
+        if start is None:
+            rendered: str = renderer.renderToken(tokens, index, options, env)
+            return rendered
+        token.attrSet("style", f"counter-reset: list-item {int(start) - 1}")
+        try:
+            rendered = renderer.renderToken(tokens, index, options, env)
+        finally:
+            token.attrs.pop("style", None)
+        return rendered
+
+    return ordered_list_open
 
 
 def stylesheets(options: RenderOptions) -> list[str]:

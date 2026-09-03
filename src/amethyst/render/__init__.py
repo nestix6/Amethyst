@@ -10,6 +10,7 @@ document is the theme they share, not a common renderer.
 from __future__ import annotations
 
 from amethyst.render.base import Renderer, RenderOptions, RenderResult, Warn
+from amethyst.render.docx import render_docx
 from amethyst.render.html import render_html
 from amethyst.render.pdf import render_pdf
 
@@ -18,6 +19,7 @@ __all__ = [
     "RenderResult",
     "Renderer",
     "Warn",
+    "render_docx",
     "render_html",
     "render_pdf",
 ]

@@ -18,6 +18,7 @@ mono = ["ui-monospace", "SF Mono", "Menlo", "DejaVu Sans Mono", "monospace"]
 # multiple of `size`, so changing it alone rescales the whole document.
 size = 11
 small = 9.5
+code = 0.85   # a multiple of `size`, for code blocks and inline code
 line_height = 1.45
 heading_weight = 600
 # h1 to h6.
