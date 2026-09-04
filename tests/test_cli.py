@@ -14,6 +14,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from docx import Document as read_docx
 
 from amethyst import cli
 from amethyst.cli import (
@@ -25,6 +26,7 @@ from amethyst.cli import (
     resolve_theme,
 )
 from amethyst.errors import UsageError
+from amethyst.render.furniture import CONTENTS_HEADING
 from amethyst.theme import DEFAULT_THEME, builtin_names, load_theme
 
 DOC = """---
@@ -344,14 +346,11 @@ def test_an_unbuilt_flag_says_so_rather_than_being_ignored(
         str(doc),
         "-o",
         "out.pdf",
-        "--toc",
         "--highlight-style",
         "monokai",
     )
     assert code == 0
-    err = capsys.readouterr().err
-    assert "--toc is not implemented yet" in err
-    assert "--highlight-style is not implemented yet" in err
+    assert "--highlight-style is not implemented yet" in capsys.readouterr().err
 
 
 def test_the_default_style_passes_without_comment(
@@ -412,3 +411,55 @@ def test_page_geometry_falls_back_to_the_theme(
     theme = load_theme(DEFAULT_THEME)
     assert theme.page.size in out
     assert theme.page.margin in out
+
+
+# --- document furniture ----------------------------------------------------
+
+
+def test_the_contents_flags_are_reported_and_honoured(
+    monkeypatch, doc, capsys, requires_weasyprint
+):
+    code = run(
+        monkeypatch,
+        "convert",
+        str(doc),
+        "-o",
+        "out.pdf",
+        "--toc",
+        "--toc-depth",
+        "2",
+        "--title-page",
+        "--verbose",
+    )
+    assert code == 0
+    out = capsys.readouterr().out
+    assert "depth 2" in out
+    assert "title page" in out
+    # Two pages of front matter in front of the one page the body fits on.
+    assert "(3 pages)" in out
+
+
+def test_a_contents_reaches_the_word_file_too(monkeypatch, doc, requires_weasyprint):
+    assert run(monkeypatch, "convert", str(doc), "-o", "out.docx", "--toc") == 0
+    document = read_docx("out.docx")
+    assert document.paragraphs[0].text == CONTENTS_HEADING
+
+
+def test_furniture_that_the_document_cannot_supply_warns_but_still_converts(
+    monkeypatch, tmp_path, capsys, requires_weasyprint
+):
+    bare = tmp_path / "bare.md"
+    bare.write_text("Just a paragraph.\n", encoding="utf-8")
+    code = run(
+        monkeypatch, "convert", str(bare), "-o", "out.pdf", "--toc", "--title-page"
+    )
+    assert code == 0
+    err = capsys.readouterr().err
+    assert "--toc needs headings" in err
+    assert "--title-page needs a title" in err
+
+
+def test_a_toc_depth_past_the_last_heading_level_is_bad_usage(monkeypatch, doc):
+    assert (
+        run(monkeypatch, "convert", str(doc), "-o", "out.pdf", "--toc-depth", "7") == 2
+    )

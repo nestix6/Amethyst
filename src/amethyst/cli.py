@@ -26,6 +26,7 @@ from amethyst.document import Document, load_document
 from amethyst.errors import AmethystError, RenderError, UsageError
 from amethyst.parse import AssetKind
 from amethyst.render import RenderOptions, render_docx, render_pdf
+from amethyst.render.furniture import MAX_TOC_DEPTH
 from amethyst.theme import (
     DEFAULT_THEME,
     builtin_names,
@@ -255,15 +256,13 @@ def report_written(destination: Path | None, pages: int | None) -> None:
     out_console().print(f"wrote {escape(where)}{detail}")
 
 
-def warn_about_unbuilt_flags(*, toc: bool, highlight_style: str) -> None:
+def warn_about_unbuilt_flags(*, highlight_style: str) -> None:
     """Say so when a flag was accepted but cannot be honoured yet.
 
     These disappear as the features behind them land. Until then, quietly
     ignoring a flag the user went out of their way to pass is the worse
     failure: the output looks wrong and nothing explains why.
     """
-    if toc:
-        warn("--toc is not implemented yet; the document will have no contents.")
     if highlight_style != DEFAULT_HIGHLIGHT_STYLE:
         warn("--highlight-style is not implemented yet; code is not highlighted.")
 
@@ -342,8 +341,17 @@ def convert(
     ] = False,
     toc_depth: Annotated[
         int,
-        typer.Option("--toc-depth", min=1, max=6, help="Heading levels in the TOC."),
+        typer.Option(
+            "--toc-depth",
+            min=1,
+            max=MAX_TOC_DEPTH,
+            help="Heading levels in the TOC.",
+        ),
     ] = 3,
+    title_page: Annotated[
+        bool,
+        typer.Option("--title-page", help="Open with a title page from frontmatter."),
+    ] = False,
     title: Annotated[
         str | None, typer.Option("--title", help="Override the frontmatter title.")
     ] = None,
@@ -394,7 +402,7 @@ def convert(
 
     if css is not None and resolved_format is not Format.pdf:
         warn("--css applies to PDF output only; ignoring it.")
-    warn_about_unbuilt_flags(toc=toc, highlight_style=highlight_style)
+    warn_about_unbuilt_flags(highlight_style=highlight_style)
 
     # A flag that names page geometry overrides the theme that declares it,
     # which leaves the theme as the one thing a renderer has to be handed.
@@ -416,6 +424,7 @@ def convert(
     if document.author is not None:
         rows.append(("author", document.author))
     rows.append(("toc", f"depth {toc_depth}" if toc else "no"))
+    rows.append(("title page", "yes" if title_page else "no"))
     rows.append(("page size", loaded_theme.page.size))
     rows.append(("margin", loaded_theme.page.margin))
     rows.append(("page numbers", "no" if no_page_numbers else "yes"))
@@ -433,6 +442,9 @@ def convert(
             theme=loaded_theme,
             extra_css=css,
             page_numbers=not no_page_numbers,
+            toc=toc,
+            toc_depth=toc_depth,
+            title_page=title_page,
             warn=warn,
         ),
     )

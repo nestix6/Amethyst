@@ -6,7 +6,7 @@ tests open the result and assert on structure — which style a paragraph
 carries, what a table's header row does, where a hyperlink points.
 
 Two kinds of assertion sit side by side below. Anything with a public
-``python-docx`` API is checked through it. The helpers in ``docx_ooxml`` have
+``python-docx`` API is checked through it. The helpers in ``amethyst.ooxml`` have
 no such API by definition, so those are checked against the XML they generate
 — which is the whole reason they are small functions in a module of their own.
 
@@ -19,18 +19,20 @@ from __future__ import annotations
 
 import io
 import re
+import subprocess
+import sys
+from datetime import date
 from pathlib import Path
 
 import pytest
 from docx import Document as read_docx
 from docx.enum.style import WD_STYLE_TYPE
-from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_TAB_LEADER
 from docx.oxml.ns import qn
 from docx.shared import Emu, Pt
 
 from amethyst.document import Document, load_document
-from amethyst.render import RenderOptions, render_docx
-from amethyst.render.docx_ooxml import (
+from amethyst.ooxml import (
     BOOKMARK_MAX_LENGTH,
     bookmark_name,
     field,
@@ -41,14 +43,23 @@ from amethyst.render.docx_ooxml import (
     set_borders,
     shade,
 )
+from amethyst.render import RenderOptions, render_docx
+from amethyst.render.furniture import CONTENTS_HEADING
 from amethyst.theme import default_theme
 from amethyst.theme.to_docx import (
     BODY_STYLE,
     CODE_INLINE_STYLE,
     CODE_STYLE,
+    COVER_DATE_STYLE,
+    COVER_SPACE_AFTER,
     FOOTNOTE_STYLE,
     QUOTE_STYLE,
+    SUBTITLE_STYLE,
     TABLE_TEXT_STYLE,
+    TITLE_PAGE_OFFSET,
+    TITLE_STYLE,
+    TOC_HEADING_STYLE,
+    TOC_INDENT,
     apply_theme,
     family,
     length,
@@ -97,6 +108,23 @@ def blank_docx():
     document = read_docx()
     apply_theme(document, default_theme())
     return document
+
+
+def test_the_theme_compiler_can_be_imported_before_anything_else():
+    """It could not be, for a whole phase, and nothing noticed.
+
+    ``theme/to_docx.py`` needs the OOXML helpers, and while those lived inside
+    ``render/`` importing them ran ``render/__init__``, which imported the
+    walker, which imported the theme compiler again — half-built. Every module
+    here happens to import ``amethyst.render`` first, which enters the ring
+    where it closes, so the suite could not see it. A subprocess can.
+    """
+    result = subprocess.run(
+        [sys.executable, "-c", "import amethyst.theme.to_docx"],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
 
 
 # --- the theme, compiled to styles ----------------------------------------
@@ -161,6 +189,52 @@ def test_the_code_style_is_shaded_and_bordered():
 def test_a_custom_style_is_based_on_the_body_one():
     document = blank_docx()
     assert document.styles[FOOTNOTE_STYLE].base_style.name == BODY_STYLE
+
+
+def test_the_cover_styles_are_unbound_from_the_look_word_ships_them_with():
+    """``Title`` arrives ruled off in an accent colour that belongs to no theme
+    here, and ``Subtitle`` italic and carrying a stray numbering reference."""
+    document = blank_docx()
+    theme = default_theme()
+
+    title = document.styles[TITLE_STYLE]
+    assert "w:pBdr" not in xml_of(title.element)
+    assert "asciiTheme" not in xml_of(title.element)
+    assert title.font.size == Pt(round(theme.type.size * theme.type.title * 2) / 2)
+
+    subtitle = document.styles[SUBTITLE_STYLE]
+    assert "w:numPr" not in xml_of(subtitle.element)
+    assert subtitle.font.italic is False
+
+
+def test_a_contents_style_exists_for_every_heading_level():
+    document = blank_docx()
+    for level in range(1, 7):
+        assert document.styles[f"TOC {level}"].type == WD_STYLE_TYPE.PARAGRAPH
+
+
+def test_a_contents_entry_is_ruled_out_to_the_page_number_with_dots():
+    """The stylesheet's ``leader('.')`` by another name."""
+    document = blank_docx()
+    section = document.sections[0]
+    stops = document.styles["TOC 1"].paragraph_format.tab_stops
+    assert [(stop.position, stop.leader) for stop in stops] == [
+        (
+            section.page_width - section.left_margin - section.right_margin,
+            WD_TAB_LEADER.DOTS,
+        )
+    ]
+
+
+def test_contents_entries_are_stepped_in_one_level_at_a_time():
+    document = blank_docx()
+    theme = default_theme()
+    step = Pt(theme.type.size * TOC_INDENT)
+    indents = [
+        document.styles[f"TOC {level}"].paragraph_format.left_indent
+        for level in (1, 2, 3)
+    ]
+    assert indents == [Pt(0), step, Pt(theme.type.size * TOC_INDENT * 2)]
 
 
 # --- page geometry --------------------------------------------------------
@@ -558,6 +632,203 @@ def test_the_file_does_not_claim_to_have_been_written_by_a_library():
     assert properties.author == ""
     assert properties.comments == ""
     assert properties.created.year >= 2026
+
+
+def test_the_frontmatter_becomes_the_properties_word_shows_in_its_info_pane():
+    document = convert(
+        "---\ntitle: T\nsubtitle: S\nauthor: A\ndate: 2026-08-31\n"
+        "keywords: [one, two]\n---\n\nBody.\n"
+    )
+    properties = document.core_properties
+    assert properties.title == "T"
+    assert properties.author == "A"
+    assert properties.subject == "S"
+    assert properties.keywords == "one, two"
+    # A declared date is the document's date, which is what "created" means.
+    assert properties.created.date() == date(2026, 8, 31)
+
+
+def test_a_date_word_could_not_read_leaves_the_timestamp_alone():
+    properties = convert("---\ndate: Spring 2026\n---\n\nBody.\n").core_properties
+    assert properties.created.year >= 2026
+
+
+# --- the front matter -----------------------------------------------------
+
+
+def test_a_title_page_is_built_from_the_frontmatter():
+    document = convert(
+        "---\ntitle: T\nsubtitle: S\nauthor: A\ndate: D\n---\n\n# H\n",
+        title_page=True,
+    )
+    assert styles(document)[:4] == [
+        TITLE_STYLE,
+        SUBTITLE_STYLE,
+        BODY_STYLE,
+        COVER_DATE_STYLE,
+    ]
+    assert texts(document)[:4] == ["T", "S", "A", "D"]
+
+
+def test_the_title_starts_down_the_page_as_the_stylesheet_pads_it_down():
+    document = convert("---\ntitle: T\n---\n\n# H\n", title_page=True)
+    theme = default_theme()
+    assert document.paragraphs[0].paragraph_format.space_before == Pt(
+        theme.type.size * TITLE_PAGE_OFFSET
+    )
+
+
+def test_the_author_sits_on_the_date_rather_than_a_paragraph_away_from_it():
+    """The one thing `Normal` gets wrong on a cover: its gap is a body gap."""
+    document = convert(
+        "---\ntitle: T\nauthor: A\ndate: D\n---\n\n# H\n", title_page=True
+    )
+    author = document.paragraphs[1]
+    assert author.text == "A"
+    assert author.paragraph_format.space_after == Pt(
+        default_theme().type.size * COVER_SPACE_AFTER
+    )
+
+
+def test_a_title_page_with_no_title_says_so_rather_than_printing_a_blank():
+    messages = warnings_from("Body with no heading.\n", title_page=True)
+    assert any("--title-page needs a title" in message for message in messages)
+
+
+def test_the_contents_is_a_field_word_rebuilds_when_it_opens_the_file():
+    document = convert("# One\n\n## Two\n", toc=True)
+    xml = "".join(xml_of(paragraph._p) for paragraph in document.paragraphs)
+    assert 'TOC \\o "1-2" \\h \\z \\u' in xml
+    # Dirty, or Word shows the stored result until someone presses F9.
+    assert 'w:fldChar w:fldCharType="begin" w:dirty="true"' in xml
+
+
+def test_the_contents_entries_are_written_out_inside_the_field():
+    """A reader that shows a field's stored result rather than evaluating it
+    should still get a contents rather than a blank page."""
+    document = convert("# One\n\n## Two\n\n### Three\n\n#### Four\n", toc=True)
+    assert styles(document)[:5] == [
+        TOC_HEADING_STYLE,
+        "TOC 1",
+        "TOC 2",
+        "TOC 3",
+        BODY_STYLE,  # the empty paragraph the section break is written on
+    ]
+    listed = texts(document)[: styles(document).index(BODY_STYLE)]
+    assert listed[0] == CONTENTS_HEADING
+    assert [entry.rstrip("\t") for entry in listed[1:]] == ["One", "Two", "Three"]
+
+
+def test_an_entry_links_to_its_heading_and_asks_word_for_its_page():
+    document = convert("## Inline formatting\n", toc=True)
+    entry = xml_of(document.paragraphs[1]._p)
+    name = bookmark_name("inline-formatting")
+    assert f'w:anchor="{name}"' in entry
+    assert f"PAGEREF {name}" in entry
+
+
+def test_a_contents_with_nothing_to_list_says_so():
+    messages = warnings_from("Body text.\n", toc=True)
+    assert any("--toc needs headings" in message for message in messages)
+
+
+def test_front_matter_becomes_a_section_of_its_own():
+    """Which is what lets it carry different furniture, and what starts the
+    document proper on a fresh page."""
+    assert len(convert("# H\n", toc=True).sections) == 2
+    assert len(convert("# H\n").sections) == 1
+
+
+def test_the_front_matter_section_keeps_the_theme_page_geometry():
+    """A section added after the theme was applied clones the one before it,
+    but saying so out loud is cheaper than finding out it stopped."""
+    theme = default_theme().with_page(size="Letter", margin="3cm")
+    document = convert("---\ntitle: T\n---\n\n# H\n", title_page=True, theme=theme)
+    assert len(document.sections) == 2
+    for section in document.sections:
+        assert round(Emu(section.page_width).mm, 1) == round(LETTER_MM[0], 1)
+        assert round(Emu(section.left_margin).cm, 2) == 3
+
+
+# --- the running head and the page number ---------------------------------
+
+
+def test_the_head_names_the_title_and_the_section_word_is_in():
+    document = convert("---\ntitle: T\n---\n\n# H\n\n## a\n\n## b\n")
+    header = document.sections[-1].header
+    assert not header.is_linked_to_previous
+    xml = xml_of(header.paragraphs[0]._p)
+    assert "<w:t>T</w:t>" in xml
+    # Word's answer to the stylesheet's named string.
+    assert 'STYLEREF "Heading 2"' in xml
+
+
+def test_the_running_head_asks_nothing_of_the_reader_to_fill_itself_in():
+    """Word works a STYLEREF out while it lays the page out, the way it works
+    out a PAGE. Marking it dirty would buy nothing and cost an "update the
+    fields in this document?" prompt on every open of every document."""
+    document = convert("---\ntitle: T\n---\n\n# H\n\n## a\n\n## b\n")
+    assert "w:dirty" not in xml_of(document.sections[-1].header.paragraphs[0]._p)
+    assert "w:dirty" not in xml_of(document.sections[-1].footer.paragraphs[0]._p)
+
+
+def test_only_a_contents_carries_a_field_word_has_to_be_asked_to_update():
+    plain = convert("# H\n\n## a\n\n## b\n")
+    listed = convert("# H\n\n## a\n\n## b\n", toc=True)
+    assert "w:dirty" not in "".join(xml_of(p._p) for p in plain.paragraphs)
+    assert "w:dirty" in "".join(xml_of(p._p) for p in listed.paragraphs)
+
+
+def test_the_head_stops_at_the_title_when_no_level_repeats():
+    document = convert("---\ntitle: T\n---\n\n# Only\n")
+    xml = xml_of(document.sections[-1].header.paragraphs[0]._p)
+    assert "<w:t>T</w:t>" in xml
+    assert "STYLEREF" not in xml
+
+
+def test_a_document_with_nothing_to_put_in_a_head_gets_none():
+    document = convert("Body text.\n")
+    assert document.sections[-1].header.is_linked_to_previous
+
+
+def test_the_head_is_tabbed_to_the_edge_of_the_text_column_not_words_default():
+    """The Header style's own tab stops sit where a US Letter sheet with
+    one-inch margins puts them, and nowhere near the edge of any other."""
+    document = convert("---\ntitle: T\n---\n\n# H\n\n## a\n\n## b\n")
+    section = document.sections[-1]
+    stops = document.sections[-1].header.paragraphs[0].paragraph_format.tab_stops
+    assert [stop.position for stop in stops] == [
+        section.page_width - section.left_margin - section.right_margin
+    ]
+
+
+def test_the_opening_page_of_a_plain_document_carries_no_head_but_is_numbered():
+    """``@page :first`` by another name — Word has no such selector, so this
+    is the "different first page" the format does have."""
+    document = convert("---\ntitle: T\n---\n\n# H\n\n## a\n\n## b\n")
+    section = document.sections[0]
+    assert section.different_first_page_header_footer
+    assert not section.first_page_footer.is_linked_to_previous
+    assert "PAGE" in xml_of(section.first_page_footer.paragraphs[0]._p)
+
+
+def test_a_cover_is_not_numbered_and_the_contents_behind_it_is():
+    document = convert("---\ntitle: T\n---\n\n# H\n", toc=True, title_page=True)
+    front = document.sections[0]
+    assert front.different_first_page_header_footer
+    assert front.first_page_footer.paragraphs[0].text == ""
+    assert "PAGE" in xml_of(front.footer.paragraphs[0]._p)
+
+
+def test_a_contents_with_no_cover_in_front_of_it_is_numbered_from_its_first_page():
+    front = convert("# H\n", toc=True).sections[0]
+    assert not front.different_first_page_header_footer
+
+
+def test_no_page_numbers_means_no_footer_at_all():
+    """A page with nothing at the foot of it, rather than an empty line."""
+    document = convert("Body.\n", page_numbers=False)
+    assert document.sections[0].footer.is_linked_to_previous
 
 
 def test_the_paragraph_after_a_table_is_given_the_gap_word_leaves_out():

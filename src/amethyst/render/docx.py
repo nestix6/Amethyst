@@ -33,13 +33,14 @@ from __future__ import annotations
 import io
 import re
 from dataclasses import dataclass, replace
-from datetime import datetime, timezone
+from datetime import datetime, time, timezone
 from pathlib import Path
 from typing import Any
 from urllib.parse import unquote, urlsplit
 
 from docx import Document as new_docx
-from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.enum.section import WD_SECTION
+from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_TAB_ALIGNMENT
 from docx.image.exceptions import UnrecognizedImageError
 from docx.oxml.ns import qn
 from docx.shared import Emu, Length, Pt
@@ -47,12 +48,12 @@ from markdown_it.token import Token
 
 from amethyst.document import Document
 from amethyst.errors import RenderError
-from amethyst.parse.assets import REMOTE_SCHEMES
-from amethyst.render.base import RenderOptions, RenderResult
-from amethyst.render.docx_ooxml import (
+from amethyst.ooxml import (
     bookmark,
     bookmark_name,
     field,
+    field_end,
+    field_start,
     link,
     numbering_instance,
     repeat_as_header,
@@ -60,23 +61,42 @@ from amethyst.render.docx_ooxml import (
     set_numbering,
     shade,
 )
+from amethyst.parse.assets import REMOTE_SCHEMES
+from amethyst.render.base import RenderOptions, RenderResult
+from amethyst.render.furniture import (
+    CONTENTS_HEADING,
+    contents,
+    cover,
+    outline_depth,
+    section_level,
+)
 from amethyst.theme.to_docx import (
     BODY_STYLE,
     BULLET_STYLES,
     CODE_INLINE_STYLE,
     CODE_STYLE,
+    COVER_DATE_STYLE,
+    COVER_SPACE_AFTER,
     FOOTER_STYLE,
     FOOTNOTE_STYLE,
+    HEADER_STYLE,
     HEADING_STYLES,
     LINK_STYLE,
     LIST_INDENT_STEP,
     NUMBER_STYLES,
     QUOTE_STYLE,
+    SUBTITLE_STYLE,
     TABLE_STYLE,
     TABLE_TEXT_STYLE,
+    TITLE_PAGE_OFFSET,
+    TITLE_STYLE,
+    TOC_HEADING_STYLE,
+    TOC_STYLES,
+    apply_page,
     apply_theme,
     quote_indent,
     rgb,
+    text_width,
 )
 
 #: What a task list item is printed as. Word has real checkbox controls, but
@@ -85,8 +105,19 @@ from amethyst.theme.to_docx import (
 CHECKED = "☑"
 UNCHECKED = "☐"
 
-#: The instruction Word evaluates to the number of the page it lands on.
+#: The instructions Word evaluates for itself: the number of the page a field
+#: lands on, the page a bookmark is on, the text of the nearest heading of one
+#: style — Word's answer to a CSS named string — and the table of contents
+#: itself, built from heading levels 1 to N.
+#:
+#: The first and third are worked out while Word lays the pages out and need
+#: nothing asked of the reader. The other two are not, and are marked dirty so
+#: that Word fills them in on open — which is what raises its "update the
+#: fields in this document?" prompt, and why only ``--toc`` raises it.
 PAGE_FIELD = "PAGE"
+PAGE_REFERENCE_FIELD = "PAGEREF {name} \\h"
+SECTION_FIELD = 'STYLEREF "{style}" \\* MERGEFORMAT'
+CONTENTS_FIELD = 'TOC \\o "1-{depth}" \\h \\z \\u'
 
 #: The air around a horizontal rule, and above the line that opens the
 #: footnotes, as multiples of the body size. Both mirror the margins the
@@ -169,29 +200,46 @@ class _Builder:
 
     def build(self) -> RenderResult:
         """Walk the whole document and return the file's bytes."""
-        self._reset_properties()
+        self._properties()
+        if self._front_matter():
+            # The front matter becomes a section of its own so that it can
+            # carry different furniture from the body — no running head, and
+            # no page number on a cover. It is also what starts the document
+            # proper on a fresh page, which is the break the stylesheet gets
+            # from `break-after: page`.
+            self._docx.add_section(WD_SECTION.NEW_PAGE)
+            apply_page(self._docx.sections[-1], self._theme, warn=self._warn)
         self._blocks(self._document.tokens, 0, len(self._document.tokens))
-        if self._options.page_numbers:
-            self._page_numbers()
+        self._furniture()
         return RenderResult(data=self._save(), pages=None)
 
-    def _reset_properties(self) -> None:
-        """Drop what the starter document claims about itself.
+    def _properties(self) -> None:
+        """Say what the document says about itself, and nothing else.
 
-        python-docx builds every document from a template whose properties say
-        it was written by "python-docx" in 2013, and Word shows those in the
-        file's info pane. Carrying the document's own title and author across
-        into them is a job for later; not attributing the file to a library
-        and dating it to a year that has been and gone is this one's.
+        python-docx builds every document from a template whose properties
+        claim it was written by "python-docx" in 2013, and Word shows those in
+        the file's info pane. They are replaced by the frontmatter — the same
+        four fields the PDF carries as its metadata — so that a reader who
+        opens the information pane sees the same thing in either format.
         """
         properties = self._docx.core_properties
-        properties.author = ""
+        properties.author = self._document.author or ""
+        properties.title = self._document.title or ""
+        properties.subject = self._document.subtitle or ""
+        properties.keywords = self._document.keywords or ""
         properties.last_modified_by = ""
         properties.comments = ""
-        properties.title = ""
         properties.revision = 1
         now = datetime.now(tz=timezone.utc)
-        properties.created = now
+        declared = self._document.created
+        # A declared date is the document's date, which is what the format
+        # means by "created". A date it could not read — "Spring 2026" — stays
+        # on the title page and out of the timestamp.
+        properties.created = (
+            datetime.combine(declared, time(), tzinfo=timezone.utc)
+            if declared is not None
+            else now
+        )
         properties.modified = now
 
     def _save(self) -> bytes:
@@ -202,14 +250,194 @@ class _Builder:
             raise RenderError(f"Could not build the Word document: {exc}.") from exc
         return buffer.getvalue()
 
-    def _page_numbers(self) -> None:
-        """Put the page number in the footer, as the PDF puts it in the margin.
+    # --- front matter ------------------------------------------------------
+
+    def _front_matter(self) -> bool:
+        """Write the cover and the contents, and say whether either happened."""
+        written = False
+        if self._options.title_page:
+            written |= self._title_page()
+        if self._options.toc:
+            written |= self._contents()
+        return written
+
+    def _title_page(self) -> bool:
+        """A cover built from the frontmatter, in the styles the theme set."""
+        page = cover(self._document)
+        if page is None:
+            self._warn(
+                "--title-page needs a title; the document declares none, so "
+                "no title page was made."
+            )
+            return False
+        title = self._docx.add_paragraph(style=self._docx.styles[TITLE_STYLE])
+        # The stylesheet pads the cover down the sheet; Word has no padding, so
+        # the same gap is set above the one paragraph it would have pushed.
+        title.paragraph_format.space_before = Pt(
+            self._theme.type.size * TITLE_PAGE_OFFSET
+        )
+        title.add_run(page.title)
+        for style, value in (
+            (SUBTITLE_STYLE, page.subtitle),
+            (BODY_STYLE, page.author),
+            (COVER_DATE_STYLE, page.date),
+        ):
+            if value:
+                line = self._docx.add_paragraph(value, style=self._docx.styles[style])
+                if style == BODY_STYLE:
+                    # The author sits on the date rather than a paragraph's gap
+                    # away from it, which is the one thing `Normal` gets wrong
+                    # on a cover.
+                    line.paragraph_format.space_after = Pt(
+                        self._theme.type.size * COVER_SPACE_AFTER
+                    )
+        return True
+
+    def _contents(self) -> bool:
+        """The contents, as a TOC field whose result is already filled in.
+
+        The field is what makes this a real Word table of contents: it is
+        marked dirty, so Word rebuilds it against its own pagination the
+        moment the file opens, and it stays right when the document is edited.
+        Writing the entries out inside it as well costs little and means every
+        other reader — one that shows a field's stored result rather than
+        evaluating it — has a contents rather than a blank page.
+        """
+        entries = contents(self._document, self._options.toc_depth)
+        if not entries:
+            self._warn(
+                "--toc needs headings; the document has none, so no contents was made."
+            )
+            return False
+
+        heading = self._docx.add_paragraph(style=self._docx.styles[TOC_HEADING_STYLE])
+        heading.add_run(CONTENTS_HEADING)
+
+        instruction = CONTENTS_FIELD.format(
+            depth=outline_depth(entries, self._options.toc_depth)
+        )
+        paragraph = None
+        for index, entry in enumerate(entries):
+            level = min(entry.level, len(TOC_STYLES))
+            paragraph = self._docx.add_paragraph(
+                style=self._docx.styles[TOC_STYLES[level - 1]]
+            )
+            if index == 0:
+                for element in field_start(instruction, dirty=True):
+                    paragraph._p.append(element)
+            self._contents_entry(paragraph, entry.text, entry.anchor)
+        if paragraph is not None:
+            paragraph._p.append(field_end())
+        return True
+
+    def _contents_entry(self, paragraph: Any, text: str, anchor: str | None) -> None:
+        """One line of the contents: the heading, a leader, and its page.
+
+        An entry with no anchor gets neither the link nor the number, because
+        both are the same bookmark by two names. Listing it unlinked beats
+        dropping a heading out of the contents without saying so.
+        """
+        run = paragraph.add_run(text)
+        if anchor is None:
+            return
+        name = bookmark_name(anchor)
+        link(paragraph, [run._r], anchor=name)
+        paragraph.add_run().add_tab()
+        # Dirty, because the placeholder is empty: nothing here knows which
+        # page a heading will land on, and Word does as soon as it opens.
+        field(paragraph, PAGE_REFERENCE_FIELD.format(name=name), dirty=True)
+
+    # --- page furniture ----------------------------------------------------
+
+    def _furniture(self) -> None:
+        """Put the running head and the page number on the pages that get them.
+
+        The two formats are made to agree here, and the agreement is worth
+        stating: the opening page of a document carries no head, whatever is
+        on it; a cover carries no page number either; and the front matter,
+        which belongs to no section, carries no head at all. In CSS that is
+        ``@page :first`` and a named page. In Word there is no such selector,
+        so it is a section for the front matter, and Word's own "different
+        first page" for a document that has none.
+        """
+        sections = self._docx.sections
+        front = sections[0] if len(sections) > 1 else None
+        body = sections[-1]
+        head = self._running_head()
+
+        if front is not None:
+            # A section with no header part simply has none, which is what the
+            # front matter wants — so the only thing to say is that the cover
+            # is not to be numbered.
+            front.different_first_page_header_footer = self._options.title_page
+            if self._options.title_page:
+                # Explicit rather than inherited: a section marked "different
+                # first page" with nothing defined for it is empty by
+                # inheritance, and inheriting from nothing is a fact about the
+                # format that is cheaper to state than to rely on.
+                front.first_page_footer.is_linked_to_previous = False
+            self._number(front.footer)
+            body.different_first_page_header_footer = False
+        else:
+            # Nothing precedes the body, so its first page is the document's
+            # opening page and takes the head off in the only way Word offers.
+            body.different_first_page_header_footer = head is not None
+            if head is not None:
+                self._number(body.first_page_footer)
+        if head is not None:
+            self._head(body.header, head)
+        self._number(body.footer)
+
+    def _running_head(self) -> tuple[str | None, int | None] | None:
+        """What the head says: the title, and the level it tracks. Or nothing."""
+        title = self._document.title
+        level = section_level(self._document)
+        if not title and level is None:
+            return None
+        return (title, level)
+
+    def _head(self, header: Any, head: tuple[str | None, int | None]) -> None:
+        """Write the running head: the title left, the current section right.
+
+        Word's answer to the stylesheet's named string is ``STYLEREF``, which
+        names the nearest heading of one style. The tab stop is set here rather
+        than left to the ``Header`` style's own, which sits where a US Letter
+        sheet with one-inch margins puts it and nowhere near the edge of any
+        other column.
+        """
+        title, level = head
+        header.is_linked_to_previous = False
+        paragraph = header.paragraphs[0]
+        paragraph.style = self._docx.styles[HEADER_STYLE]
+        width = text_width(self._docx.sections[-1])
+        if width is not None:
+            paragraph.paragraph_format.tab_stops.add_tab_stop(
+                width, WD_TAB_ALIGNMENT.RIGHT
+            )
+        if title:
+            paragraph.add_run(title)
+        if level is not None:
+            paragraph.add_run().add_tab()
+            # Not marked dirty, and deliberately: Word works a STYLEREF out
+            # while it lays the page out, the same way it works out a PAGE, so
+            # the head fills itself in with nothing asked of the reader.
+            # Marking it would cost a "do you want to update the fields in this
+            # document?" on every open and buy nothing. Verified in Word.
+            field(paragraph, SECTION_FIELD.format(style=HEADING_STYLES[level - 1]))
+
+    def _number(self, footer: Any) -> None:
+        """Put the page number in a footer, as the PDF puts it in the margin.
 
         A field rather than a number: nothing here knows how many pages Word
         will decide the document has, and a field is how the format says "the
-        number of the page this lands on".
+        number of the page this lands on". With ``--no-page-numbers`` no
+        footer is defined at all, which is a page with nothing at the foot of
+        it rather than a page with an empty line there.
         """
-        paragraph = self._docx.sections[0].footer.paragraphs[0]
+        if not self._options.page_numbers:
+            return
+        footer.is_linked_to_previous = False
+        paragraph = footer.paragraphs[0]
         paragraph.style = self._docx.styles[FOOTER_STYLE]
         paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
         field(paragraph, PAGE_FIELD, "1")
@@ -622,17 +850,10 @@ class _Builder:
     def _column_width(self) -> Length | None:
         """The width of the text column, which an image may not exceed.
 
-        ``None`` when the section declares no width of its own, in which case
-        there is nothing to measure an image against and it is left alone.
+        The last section rather than the first: front matter opens a section
+        of its own, and the body an image sits in is the one after it.
         """
-        section = self._docx.sections[0]
-        if section.page_width is None:
-            return None
-        return Emu(
-            int(section.page_width)
-            - int(section.left_margin or 0)
-            - int(section.right_margin or 0)
-        )
+        return text_width(self._docx.sections[-1])
 
     def _skip_html(self, token: Token, line: int | None = None) -> None:
         """Warn once per line that raw HTML was dropped, and carry on.

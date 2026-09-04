@@ -84,6 +84,11 @@ class Type:
     #: — and declared once here because both compilers need it, and a Word
     #: style cannot read it off the stylesheet.
     code: float
+    #: The title on a title page, as a multiple of the body size. Its own
+    #: setting rather than the h1 size because a cover is not a section
+    #: opening: a title set at exactly the size of the heading on the next
+    #: page reads as a heading that was given a page to itself.
+    title: float
     #: Line height, as a multiple of the font size.
     line_height: float
     #: CSS font weight for headings, 100–900.
@@ -337,6 +342,7 @@ def _build(
             size=_positive(data, "type", "size", source),
             small=_positive(data, "type", "small", source),
             code=_positive(data, "type", "code", source),
+            title=_positive(data, "type", "title", source),
             line_height=_positive(data, "type", "line_height", source),
             heading_weight=_weight(data, "type", "heading_weight", source),
             headings=_scale(data, "type", "headings", source),

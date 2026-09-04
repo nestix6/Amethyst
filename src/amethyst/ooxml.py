@@ -8,6 +8,12 @@ elements built by hand, and they live here — together, and away from the
 walker — because they are fiddly, individually testable, and will be returned
 to.
 
+This module sits under neither pipeline, which is the point. Both the Word
+renderer and the theme compiler need these elements, and a module inside
+``render/`` that ``theme/`` imported would close a circle: importing it runs
+``render/__init__``, which imports the walker, which imports the theme
+compiler again.
+
 The one thing that matters everywhere below: Word validates a document against
 the schema when it opens it, and rejects the whole file when a child element
 is in the wrong place. So the *order* of the children of a properties element
@@ -271,6 +277,19 @@ def set_borders(
         _insert(container, element, tag)
 
 
+def clear_properties_child(properties: Any, tag: str) -> None:
+    """Take a child off a properties element, if it is there at all.
+
+    The counterpart of :func:`properties_child`, and needed because Word's
+    built-in styles arrive carrying things a theme has to undo rather than
+    override — a rule drawn under ``Title`` in an accent colour that belongs
+    to no theme here, or the stray numbering reference on ``Subtitle``.
+    """
+    element = properties.find(qn(tag))
+    if element is not None:
+        properties.remove(element)
+
+
 def repeat_as_header(row: Any) -> None:
     """Mark a table row as the header, so it repeats on every page.
 
@@ -347,28 +366,55 @@ def link(
 # --- fields ---------------------------------------------------------------
 
 
-def field(paragraph: Any, instruction: str, placeholder: str = "") -> None:
-    """Append a field — ``PAGE``, ``NUMPAGES``, ``TOC`` — to a paragraph.
+def field(
+    paragraph: Any, instruction: str, placeholder: str = "", *, dirty: bool = False
+) -> None:
+    """Append a field — ``PAGE``, ``PAGEREF``, ``STYLEREF`` — to a paragraph.
 
     A field is not a value but an instruction that Word evaluates when it
     opens the document, which is the only way to write something that has to
     know a page number the writer cannot know. The placeholder is what a
     reader that does not evaluate fields shows instead.
+
+    ``dirty`` asks Word to evaluate the field as soon as it opens the file
+    rather than showing the placeholder until someone presses F9. It is what a
+    field with no useful placeholder — a page number nothing here can compute
+    — needs to arrive filled in.
     """
     for child in (
-        _field_char("begin"),
-        _instruction(instruction),
-        _field_char("separate"),
+        *field_start(instruction, dirty=dirty),
         _text_run(placeholder),
-        _field_char("end"),
+        field_end(),
     ):
         paragraph._p.append(child)
 
 
-def _field_char(kind: str) -> Any:
+def field_start(instruction: str, *, dirty: bool = False) -> tuple[Any, ...]:
+    """The runs that open a field, up to where its result begins.
+
+    Separate from :func:`field` because a field's result is not always one
+    run in one paragraph: a table of contents is a run of paragraphs, and the
+    only way to write one is to open the field in the first and close it in
+    the last.
+    """
+    return (
+        _field_char("begin", dirty=dirty),
+        _instruction(instruction),
+        _field_char("separate"),
+    )
+
+
+def field_end() -> Any:
+    """The run that closes a field opened by :func:`field_start`."""
+    return _field_char("end")
+
+
+def _field_char(kind: str, *, dirty: bool = False) -> Any:
     run = OxmlElement("w:r")
     char = OxmlElement("w:fldChar")
     char.set(qn("w:fldCharType"), kind)
+    if dirty:
+        char.set(qn("w:dirty"), "true")
     run.append(char)
     return run
 
@@ -479,7 +525,10 @@ __all__ = [
     "HAIRLINE",
     "bookmark",
     "bookmark_name",
+    "clear_properties_child",
     "field",
+    "field_end",
+    "field_start",
     "link",
     "numbering_instance",
     "properties_child",

@@ -7,9 +7,9 @@ path resolves against, and stdin has the second without having the first.
 
 from __future__ import annotations
 
+import datetime
 import sys
 from dataclasses import dataclass, field
-from datetime import date
 from pathlib import Path
 from typing import Any
 
@@ -19,6 +19,21 @@ from amethyst.errors import InputError
 from amethyst.parse.assets import Asset, resolve_assets
 from amethyst.parse.frontmatter import split_frontmatter
 from amethyst.parse.markdown import build_parser
+
+
+@dataclass(frozen=True)
+class Heading:
+    """One heading, as the contents and the running head see it."""
+
+    #: 1 for ``h1``, 6 for ``h6``.
+    level: int
+    #: The heading's visible text, with the markup flattened out of it.
+    text: str
+    #: The HTML id the anchors plugin gave it, which is what a contents entry
+    #: links to and what a Word bookmark is named after. ``None`` only if the
+    #: parser ever stops assigning one, in which case the entry is still
+    #: listed — unlinked, and without a page number.
+    anchor: str | None = None
 
 
 @dataclass
@@ -70,7 +85,16 @@ class Document:
     @property
     def title(self) -> str | None:
         """The frontmatter title, or failing that the first level-1 heading."""
-        return _as_text(self.metadata.get("title")) or _first_heading(self.tokens)
+        declared = _as_text(self.metadata.get("title"))
+        if declared is not None:
+            return declared
+        first = next((item for item in self.headings if item.level == 1), None)
+        return (first.text or None) if first is not None else None
+
+    @property
+    def subtitle(self) -> str | None:
+        """The declared subtitle. It reaches the title page and the metadata."""
+        return _as_text(self.metadata.get("subtitle"))
 
     @property
     def author(self) -> str | None:
@@ -81,6 +105,53 @@ class Document:
     def date(self) -> str | None:
         """The declared date, as text. YAML dates arrive parsed; ISO them back."""
         return _as_text(self.metadata.get("date"))
+
+    @property
+    def keywords(self) -> str | None:
+        """The declared keywords, comma-separated — which both formats want."""
+        return _as_text(self.metadata.get("keywords"))
+
+    @property
+    def created(self) -> datetime.date | None:
+        """The declared date as a real date, or ``None`` if it is not one.
+
+        A document may be dated "Spring 2026", which belongs on a title page
+        and nowhere near a file's creation timestamp. Only a date that parses
+        reaches the PDF's and Word's metadata; the rest stays text.
+        """
+        text = self.date
+        if text is None:
+            return None
+        try:
+            return datetime.date.fromisoformat(text)
+        except ValueError:
+            return None
+
+    @property
+    def headings(self) -> list[Heading]:
+        """Every heading in the document, in the order they are written.
+
+        Derived from the tokens rather than collected during the parse: the
+        contents, the running head and Word's bookmarks all want the same
+        list, and there is nothing here that the token stream does not already
+        say.
+        """
+        found: list[Heading] = []
+        for index, token in enumerate(self.tokens):
+            if token.type != "heading_open":
+                continue
+            inline = self.tokens[index + 1] if index + 1 < len(self.tokens) else None
+            if inline is None or inline.type != "inline":
+                continue
+            anchor = token.attrGet("id")
+            found.append(
+                Heading(
+                    level=int(token.tag[1:]),
+                    text=_inline_text(inline),
+                    anchor=anchor if isinstance(anchor, str) and anchor else None,
+                )
+            )
+        return found
 
     @property
     def missing_assets(self) -> list[Asset]:
@@ -124,17 +195,6 @@ def _read_stdin() -> str:
         ) from exc
 
 
-def _first_heading(tokens: list[Token]) -> str | None:
-    """The text of the first level-1 heading, markup stripped."""
-    for index, token in enumerate(tokens):
-        if token.type == "heading_open" and token.tag == "h1":
-            inline = tokens[index + 1] if index + 1 < len(tokens) else None
-            if inline is None or inline.type != "inline":
-                return None
-            return _inline_text(inline) or None
-    return None
-
-
 def _inline_text(token: Token) -> str:
     """Flatten an inline token to its visible text, dropping the markup."""
     if not token.children:
@@ -160,7 +220,7 @@ def _as_text(value: Any) -> str | None:
         return value.strip() or None
     if isinstance(value, bool):
         return "true" if value else "false"
-    if isinstance(value, date):  # covers datetime, which subclasses it
+    if isinstance(value, datetime.date):  # covers datetime, which subclasses it
         return value.isoformat()
     if isinstance(value, list | tuple):
         joined = ", ".join(text for text in map(_as_text, value) if text)

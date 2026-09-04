@@ -22,6 +22,12 @@ from amethyst.document import Document
 from amethyst.errors import RenderError
 from amethyst.parse import build_parser
 from amethyst.render.base import RenderOptions
+from amethyst.render.furniture import (
+    CONTENTS_HEADING,
+    contents,
+    cover,
+    section_level,
+)
 from amethyst.theme import base_css
 from amethyst.theme.to_css import page_css, root_css
 
@@ -36,14 +42,103 @@ def render_html(document: Document, options: RenderOptions) -> str:
             "<!DOCTYPE html>",
             '<html><head><meta charset="utf-8">',
             f"<title>{escape(document.title or FALLBACK_TITLE)}</title>",
-            *(f"<style>\n{sheet}</style>" for sheet in stylesheets(options)),
+            *meta_tags(document),
+            *(f"<style>\n{sheet}</style>" for sheet in stylesheets(document, options)),
             "</head>",
             "<body>",
+            *front_matter(document, options),
             render_body(document),
             "</body></html>",
             "",
         ]
     )
+
+
+def meta_tags(document: Document) -> list[str]:
+    """The frontmatter, as the tags WeasyPrint turns into PDF metadata.
+
+    The same four fields the Word renderer writes into its core properties, so
+    that a reader looking at the document's information pane sees the same
+    thing whichever format they were sent. The date is written only when it is
+    a real one: ``dcterms.created`` is a timestamp, and a document dated
+    "Spring 2026" has a date for its title page and none for its metadata.
+    """
+    declared = [
+        ("author", document.author),
+        ("description", document.subtitle),
+        ("keywords", document.keywords),
+        ("dcterms.created", document.created.isoformat() if document.created else None),
+    ]
+    return [
+        f'<meta name="{name}" content="{escape(value, quote=True)}">'
+        for name, value in declared
+        if value
+    ]
+
+
+def front_matter(document: Document, options: RenderOptions) -> list[str]:
+    """The cover and the contents, in the order they are read."""
+    pages = []
+    if options.title_page:
+        pages += title_page_html(document, options)
+    if options.toc:
+        pages += contents_html(document, options)
+    return pages
+
+
+def title_page_html(document: Document, options: RenderOptions) -> list[str]:
+    """A cover built from the frontmatter, or nothing when there is no title."""
+    page = cover(document)
+    if page is None:
+        options.warn(
+            "--title-page needs a title; the document declares none, so no "
+            "title page was made."
+        )
+        return []
+    lines = ['<section class="title-page">']
+    for css_class, value in (
+        ("doc-title", page.title),
+        ("doc-subtitle", page.subtitle),
+        ("doc-author", page.author),
+        ("doc-date", page.date),
+    ):
+        if value:
+            lines.append(f'<p class="{css_class}">{escape(value)}</p>')
+    lines.append("</section>")
+    return lines
+
+
+def contents_html(document: Document, options: RenderOptions) -> list[str]:
+    """The table of contents, with the page numbers left for the PDF stage.
+
+    Every entry is written as a link, and the dots and the page number are
+    added by the stylesheet through ``target-counter`` — which only resolves
+    once the document has been laid out, so there is nothing to count here.
+    """
+    entries = contents(document, options.toc_depth)
+    if not entries:
+        options.warn(
+            "--toc needs headings; the document has none, so no contents was made."
+        )
+        return []
+    lines = [
+        '<nav class="contents">',
+        f'<h1 class="toc-heading">{CONTENTS_HEADING}</h1>',
+        "<ol>",
+    ]
+    for entry in entries:
+        label = escape(entry.text)
+        # An entry with no anchor cannot be linked, and so cannot carry a page
+        # number either — target-counter has nothing to resolve. Listing it
+        # unlinked beats dropping a heading out of the contents silently.
+        body = (
+            f'<a href="#{escape(entry.anchor, quote=True)}">{label}</a>'
+            if entry.anchor
+            else label
+        )
+        lines.append(f'<li class="toc-{entry.level}">{body}</li>')
+    lines += ["</ol>", "</nav>"]
+    return lines
 
 
 def render_body(document: Document) -> str:
@@ -105,7 +200,7 @@ def _ordered_list_rule(renderer: RendererHTML) -> Callable[..., str]:
     return ordered_list_open
 
 
-def stylesheets(options: RenderOptions) -> list[str]:
+def stylesheets(document: Document, options: RenderOptions) -> list[str]:
     """The stylesheets to inline, in cascade order — last one wins.
 
     The theme goes after the structural sheet rather than before it: both
@@ -115,7 +210,14 @@ def stylesheets(options: RenderOptions) -> list[str]:
     sheets = [
         base_css(),
         root_css(options.theme),
-        page_css(options.theme, page_numbers=options.page_numbers),
+        page_css(
+            options.theme,
+            page_numbers=options.page_numbers,
+            running_title=document.title,
+            running_section=section_level(document),
+            front_matter=options.title_page or options.toc,
+            title_page=options.title_page,
+        ),
     ]
     if options.extra_css is not None:
         sheets.append(read_css(options.extra_css))

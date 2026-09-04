@@ -21,6 +21,7 @@
   --size-body: 11pt;
   --size-small: 9.5pt;
   --size-code: 0.85em;
+  --size-title: 2.6em;
   --leading: 1.45;
   --weight-heading: 600;
 
@@ -64,6 +65,96 @@ body {
   orphans: 2;
   widows: 2;
 }
+
+/* --- front matter ------------------------------------------------------ */
+
+/* The cover and the contents sit on a named page, which is how the generated
+   block takes the running head off them without counting pages: they belong to
+   no section, so there is no section for a head to name. */
+
+.title-page,
+.contents {
+  page: front;
+  break-after: page;
+}
+
+/* Roughly the upper third of the sheet. The Word renderer sets the same gap
+   above its title, in the same multiple of the body size, because neither
+   format has a way to read it off the other. */
+.title-page {
+  padding-top: 8em;
+}
+
+/* Not a heading: an h1 here would open a section, put an entry in the PDF
+   outline and set the running head, none of which a cover should do. */
+.doc-title {
+  font-family: var(--font-heading);
+  font-size: var(--size-title);
+  font-weight: var(--weight-heading);
+  line-height: 1.15;
+  letter-spacing: -0.015em;
+  margin: 0 0 0.3em;
+}
+
+.doc-subtitle {
+  font-size: var(--size-h3);
+  font-weight: 400;
+  line-height: 1.3;
+  color: var(--color-muted);
+  margin: 0 0 3em;
+}
+
+.doc-author {
+  margin: 0 0 0.15em;
+}
+
+.doc-date {
+  font-size: var(--size-small);
+  color: var(--color-muted);
+  margin: 0;
+}
+
+/* --- contents ---------------------------------------------------------- */
+
+/* The contents names no section of its own, and the generated block sets the
+   named string from a heading level that this could well be. A class beats a
+   bare element selector, so this wins wherever that lands. */
+.toc-heading {
+  string-set: section "";
+}
+
+.contents ol {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.contents li {
+  margin: 0 0 0.3em;
+}
+
+.contents a {
+  color: inherit;
+  text-decoration: none;
+}
+
+/* The dots and the page number, which only a paged renderer can fill in:
+   target-counter resolves the href against the page the heading landed on. */
+.contents a::after {
+  content: ' ' leader('.') ' ' target-counter(attr(href), page);
+  color: var(--color-muted);
+}
+
+.contents .toc-1 {
+  font-weight: var(--weight-heading);
+  margin-top: 0.7em;
+}
+
+.contents .toc-2 { padding-left: 1.2em; }
+.contents .toc-3 { padding-left: 2.4em; }
+.contents .toc-4 { padding-left: 3.6em; }
+.contents .toc-5 { padding-left: 4.8em; }
+.contents .toc-6 { padding-left: 6em; }
 
 /* --- headings ---------------------------------------------------------- */
 

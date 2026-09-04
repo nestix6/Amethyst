@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import date
 from pathlib import Path
 
 import pytest
@@ -107,6 +108,48 @@ def test_blank_metadata_values_read_as_absent():
     document = parse("---\ntitle: '   '\nauthor:\n---\n\n# Heading\n")
     assert document.title == "Heading"
     assert document.author is None
+
+
+def test_the_subtitle_and_keywords_reach_the_metadata_of_both_formats():
+    document = parse("---\nsubtitle: A second line\nkeywords:\n  - one\n  - two\n---\n")
+    assert document.subtitle == "A second line"
+    assert document.keywords == "one, two"
+
+
+def test_a_declared_date_that_parses_becomes_a_real_date():
+    assert parse("---\ndate: 2026-08-31\n---\n").created == date(2026, 8, 31)
+
+
+def test_a_date_that_is_not_one_stays_on_the_title_page_and_off_the_file():
+    """ "Spring 2026" belongs on a cover and nowhere near a timestamp."""
+    document = parse("---\ndate: Spring 2026\n---\n")
+    assert document.date == "Spring 2026"
+    assert document.created is None
+
+
+def test_a_document_with_no_date_has_none():
+    assert parse("Body.\n").created is None
+
+
+# --- headings -------------------------------------------------------------
+
+
+def test_every_heading_is_listed_with_its_level_text_and_anchor():
+    document = parse("# One\n\n### Three deep\n\n## Two\n")
+    assert [(item.level, item.text, item.anchor) for item in document.headings] == [
+        (1, "One", "one"),
+        (3, "Three deep", "three-deep"),
+        (2, "Two", "two"),
+    ]
+
+
+def test_a_heading_is_listed_by_its_text_not_its_markup():
+    document = parse("## A *typeset* `document`\n")
+    assert [item.text for item in document.headings] == ["A typeset document"]
+
+
+def test_a_document_with_no_headings_lists_none():
+    assert parse("Body text.\n").headings == []
 
 
 # --- parser configuration -------------------------------------------------

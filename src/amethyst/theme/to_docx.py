@@ -16,7 +16,7 @@ is not enough, the theme binding has to be taken off as well.
 Only three levels of list style exist (``List Bullet`` … ``List Bullet 3``),
 so deeper nesting has to be clamped rather than continued.
 
-And this module reaches into :mod:`amethyst.render.docx_ooxml` for shading and
+And this module reaches into :mod:`amethyst.ooxml` for shading and
 borders, which is the one place the theme layer looks at the render layer.
 Word styles are XML, so a compiler that targets them needs the same handful of
 elements the renderer does, and the alternative — a second copy of ``w:shd``
@@ -30,10 +30,11 @@ from collections.abc import Callable, Sequence
 from typing import Any
 
 from docx.enum.style import WD_STYLE_TYPE
+from docx.enum.text import WD_TAB_ALIGNMENT, WD_TAB_LEADER
 from docx.oxml.ns import qn
 from docx.shared import Emu, Length, Pt, RGBColor
 
-from amethyst.render.docx_ooxml import set_borders, shade
+from amethyst.ooxml import clear_properties_child, set_borders, shade
 from amethyst.theme import Theme
 
 #: Paragraph and character styles Amethyst defines because Word has nothing
@@ -43,16 +44,27 @@ CODE_STYLE = "Amethyst Code"
 CODE_INLINE_STYLE = "Amethyst Code Inline"
 TABLE_TEXT_STYLE = "Amethyst Table Text"
 FOOTNOTE_STYLE = "Amethyst Footnote"
+COVER_DATE_STYLE = "Amethyst Cover Date"
 
 #: Built-in styles the theme restyles rather than replaces. A Word user who
 #: knows these names should find them doing what the names say.
 BODY_STYLE = "Normal"
 QUOTE_STYLE = "Quote"
 FOOTER_STYLE = "Footer"
+HEADER_STYLE = "Header"
 LINK_STYLE = "Hyperlink"
 TABLE_STYLE = "Table Grid"
+TITLE_STYLE = "Title"
+SUBTITLE_STYLE = "Subtitle"
+TOC_HEADING_STYLE = "TOC Heading"
 
 HEADING_STYLES = tuple(f"Heading {level}" for level in range(1, 7))
+
+#: Contents entries, one style per heading level. Word writes these itself
+#: when it refreshes the field, so they exist to be found rather than to be
+#: chosen: a refreshed contents comes back styled by the theme and not by
+#: Word's factory defaults.
+TOC_STYLES = tuple(f"TOC {level}" for level in range(1, 7))
 
 #: List styles, outermost level first. Word defines three and no more, so the
 #: fourth level of nesting and everything under it reuses the third.
@@ -122,6 +134,23 @@ CODE_LEADING = 1.4
 HEADING_SPACE_BEFORE = 1.4
 HEADING_SPACE_AFTER = 0.5
 
+#: The title page and the contents, in the same multiples of the body size the
+#: stylesheet uses for them. Word cannot read a stylesheet and CSS cannot read
+#: a Word style, so these are two copies of one decision — which is why they
+#: are written here, beside the rest of that decision, rather than inline.
+TITLE_LEADING = 1.15
+TITLE_SPACE_AFTER = 0.3
+SUBTITLE_LEADING = 1.3
+SUBTITLE_SPACE_AFTER = 3.0
+COVER_SPACE_AFTER = 0.15
+#: How far down the sheet the title starts: ``.title-page { padding-top }``.
+TITLE_PAGE_OFFSET = 8.0
+#: One level of contents indent, and the gap under an entry.
+TOC_INDENT = 1.2
+TOC_SPACE_AFTER = 0.3
+#: The air above a top-level contents entry, which groups the ones under it.
+TOC_SPACE_BEFORE = 0.7
+
 Warn = Callable[[str], None]
 
 
@@ -143,8 +172,12 @@ def apply_theme(document: Any, theme: Theme, *, warn: Warn = _discard) -> None:
     _tables(document, theme)
     _footnotes(document, theme)
     _links(document, theme)
-    _footer(document, theme)
+    _running(document, theme)
     apply_page(document.sections[0], theme, warn=warn)
+    # After the page, because a contents entry needs a tab stop at the right
+    # edge of the text column and there is no column until the sheet is set.
+    _cover(document, theme)
+    _contents(document, theme)
 
 
 # --- styles ---------------------------------------------------------------
@@ -274,10 +307,108 @@ def _links(document: Any, theme: Theme) -> None:
     style.font.underline = False
 
 
-def _footer(document: Any, theme: Theme) -> None:
-    style = document.styles[FOOTER_STYLE]
+def _running(document: Any, theme: Theme) -> None:
+    """The head and the foot, which are the same small muted register."""
+    for name in (HEADER_STYLE, FOOTER_STYLE):
+        _font(
+            document.styles[name],
+            family(theme.fonts.body),
+            size=theme.type.small,
+            color=theme.colors.muted,
+        )
+
+
+def _cover(document: Any, theme: Theme) -> None:
+    """Word's ``Title`` and ``Subtitle``, restyled into a title page.
+
+    Both arrive bound to the document theme rather than to this one — the
+    title is ruled off underneath in an accent colour that belongs to no theme
+    here, and the subtitle is italic, coloured and, oddly, carries a numbering
+    reference. All of that has to be taken off rather than overridden.
+    """
+    title = document.styles[TITLE_STYLE]
     _font(
-        style, family(theme.fonts.body), size=theme.type.small, color=theme.colors.muted
+        title,
+        family(theme.fonts.heading),
+        size=theme.type.size * theme.type.title,
+        color=theme.colors.text,
+        bold=theme.type.heading_weight >= BOLD_AT,
+        italic=False,
+    )
+    properties = title.element.get_or_add_pPr()
+    clear_properties_child(properties, "w:pBdr")
+    title.paragraph_format.line_spacing = TITLE_LEADING
+    title.paragraph_format.space_before = Pt(0)
+    title.paragraph_format.space_after = Pt(theme.type.size * TITLE_SPACE_AFTER)
+
+    subtitle = document.styles[SUBTITLE_STYLE]
+    _font(
+        subtitle,
+        family(theme.fonts.body),
+        size=theme.type.size * theme.type.headings[2],
+        color=theme.colors.muted,
+        bold=False,
+        italic=False,
+    )
+    clear_properties_child(subtitle.element.get_or_add_pPr(), "w:numPr")
+    subtitle.paragraph_format.line_spacing = SUBTITLE_LEADING
+    subtitle.paragraph_format.space_before = Pt(0)
+    subtitle.paragraph_format.space_after = Pt(theme.type.size * SUBTITLE_SPACE_AFTER)
+
+    date = _new_style(document, COVER_DATE_STYLE, WD_STYLE_TYPE.PARAGRAPH)
+    _font(
+        date, family(theme.fonts.body), size=theme.type.small, color=theme.colors.muted
+    )
+    date.paragraph_format.space_before = Pt(0)
+    date.paragraph_format.space_after = Pt(0)
+
+
+def _contents(document: Any, theme: Theme) -> None:
+    """The contents entry styles, one per heading level.
+
+    Each carries a right tab stop with a dotted leader at the edge of the text
+    column, which is what turns "heading, tab, page number" into a line of
+    dots ending in a number — the stylesheet's ``leader('.')`` by another
+    name.
+    """
+    width = text_width(document.sections[0])
+    for level, name in enumerate(TOC_STYLES, start=1):
+        style = _new_style(document, name, WD_STYLE_TYPE.PARAGRAPH, builtin=True)
+        _font(
+            style,
+            family(theme.fonts.body),
+            size=theme.type.size,
+            color=theme.colors.text,
+            # Only the top level is set apart, as the stylesheet sets it.
+            bold=level == 1 and theme.type.heading_weight >= BOLD_AT,
+            italic=False,
+        )
+        paragraph = style.paragraph_format
+        paragraph.left_indent = Pt(theme.type.size * TOC_INDENT * (level - 1))
+        paragraph.space_before = Pt(
+            theme.type.size * (TOC_SPACE_BEFORE if level == 1 else 0)
+        )
+        paragraph.space_after = Pt(theme.type.size * TOC_SPACE_AFTER)
+        paragraph.line_spacing = HEADING_LEADING
+        if width is not None:
+            paragraph.tab_stops.add_tab_stop(
+                width, WD_TAB_ALIGNMENT.RIGHT, WD_TAB_LEADER.DOTS
+            )
+
+
+def text_width(section: Any) -> Length | None:
+    """The width of the text column, which is the sheet less its margins.
+
+    ``None`` when the section declares no width of its own: there is then
+    nothing to measure a picture or a tab stop against, and whatever wanted
+    one has to do without.
+    """
+    if section.page_width is None:
+        return None
+    return Emu(
+        int(section.page_width)
+        - int(section.left_margin or 0)
+        - int(section.right_margin or 0)
     )
 
 
@@ -474,15 +605,23 @@ __all__ = [
     "BULLET_STYLES",
     "CODE_INLINE_STYLE",
     "CODE_STYLE",
+    "COVER_DATE_STYLE",
+    "COVER_SPACE_AFTER",
     "FOOTNOTE_STYLE",
     "FOOTER_STYLE",
+    "HEADER_STYLE",
     "HEADING_STYLES",
     "LINK_STYLE",
     "LIST_INDENT_STEP",
     "NUMBER_STYLES",
     "QUOTE_STYLE",
+    "SUBTITLE_STYLE",
     "TABLE_STYLE",
     "TABLE_TEXT_STYLE",
+    "TITLE_PAGE_OFFSET",
+    "TITLE_STYLE",
+    "TOC_HEADING_STYLE",
+    "TOC_STYLES",
     "apply_page",
     "apply_theme",
     "family",
@@ -491,4 +630,5 @@ __all__ = [
     "page_size",
     "quote_indent",
     "rgb",
+    "text_width",
 ]

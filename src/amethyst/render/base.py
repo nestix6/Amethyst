@@ -42,6 +42,13 @@ class RenderOptions:
     #: Extra stylesheet, appended after everything else so it wins. PDF only.
     extra_css: Path | None = None
     page_numbers: bool = True
+    #: Whether to open the document with a table of contents, and how deep to
+    #: take it. The depth is carried even when the contents is off, so that
+    #: nothing has to reason about which of the two flags was passed.
+    toc: bool = False
+    toc_depth: int = 3
+    #: Whether to open the document with a title page built from frontmatter.
+    title_page: bool = False
     warn: Warn = discard
 
 
