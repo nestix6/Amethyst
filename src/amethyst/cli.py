@@ -102,6 +102,7 @@ state = State()
 
 
 def _version_callback(value: bool) -> None:
+    """Print the version and stop, before any argument is validated."""
     if value:
         console.print(f"amethyst {__version__}")
         raise typer.Exit()

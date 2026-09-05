@@ -9,6 +9,8 @@ description = "Turn a Markdown file into a well-typeset PDF or Word document."
 readme = "README.md"
 requires-python = ">=3.10"
 authors = [{ name = "Patrik Repkovsky" }]
+license = "MIT"
+license-files = ["LICENSE"]
 keywords = ["markdown", "pdf", "docx", "typesetting", "cli"]
 classifiers = [
   "Development Status :: 3 - Alpha",
@@ -33,6 +35,11 @@ dependencies = [
   "pyyaml>=6.0",
   "tomli>=2.0; python_version < '3.11'",
 ]
+
+[project.urls]
+Homepage = "https://github.com/nestix6/Amethyst"
+Repository = "https://github.com/nestix6/Amethyst"
+Issues = "https://github.com/nestix6/Amethyst/issues"
 
 [project.scripts]
 amethyst = "amethyst.cli:main"

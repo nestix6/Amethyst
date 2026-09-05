@@ -21,6 +21,3 @@ dist/
 # Amethyst emits these; add `!tests/fixtures/**` if binary fixtures are ever needed
 *.pdf
 *.docx
-
-# References
-.references/

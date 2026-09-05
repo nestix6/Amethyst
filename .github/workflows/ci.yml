@@ -1,0 +1,132 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Test on Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # WeasyPrint loads Pango through cffi at render time, so the PDF half of
+      # the suite needs it present. Without it those tests skip rather than
+      # fail, which would make a green run mean less than it looks like.
+      - name: Install Pango
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libpango-1.0-0 libpangoft2-1.0-0 libharfbuzz-subset0
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      # Before syncing, because `uv sync` would bring the lockfile up to date
+      # itself and there would be nothing left to catch.
+      - name: Check the lockfile is current
+        run: uv lock --check
+
+      # --frozen so a CI run installs what the lockfile says and never quietly
+      # resolves something newer.
+      - name: Install the project
+        run: uv sync --frozen --python ${{ matrix.python-version }}
+
+      - name: Test
+        run: uv run pytest -q
+
+      # The suite proves a PDF is well-formed, not that it renders at all from
+      # an installed console script — which is a different code path, and the
+      # one users take. Both formats, end to end, on every version.
+      - name: Convert the kitchen sink
+        run: |
+          uv run amethyst convert tests/fixtures/kitchen-sink.md \
+            -o kitchen-sink.pdf --toc --title-page --no-remote
+          uv run amethyst convert tests/fixtures/kitchen-sink.md \
+            -o kitchen-sink.docx --toc --title-page --no-remote
+          test -s kitchen-sink.pdf
+          test -s kitchen-sink.docx
+
+  lint:
+    name: Lint and types
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      # No Pango here on purpose: `amethyst --help`, the linters and the type
+      # checker must all work on a machine that has never heard of it, because
+      # the DOCX half of the tool does.
+      - name: Install the project
+        run: uv sync --frozen --python 3.13
+
+      - name: ruff check
+        run: uv run ruff check src/ tests/
+
+      - name: ruff format
+        run: uv run ruff format --check src/ tests/
+
+      - name: mypy
+        run: uv run mypy src/amethyst
+
+      - name: The CLI loads without Pango
+        run: uv run amethyst --help
+
+  build:
+    name: Build the wheel
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Build
+        run: uv build
+
+      # The theme TOML and the stylesheet are package data. A wheel that left
+      # them out installs cleanly and fails on the first conversion, which is
+      # exactly the bug the src/ layout exists to catch.
+      - name: The wheel carries its data files
+        run: |
+          python3 -m zipfile -l dist/*.whl | tee contents.txt
+          grep -q 'amethyst/theme/builtin/default.toml' contents.txt
+          grep -q 'amethyst/theme/builtin/css/base.css' contents.txt
+
+      # From the wheel rather than the checkout, so nothing resolves against
+      # the source tree. DOCX because it needs no system library: this job
+      # deliberately has no Pango, and the conversion still has to work.
+      - name: The installed wheel converts
+        run: |
+          uv venv --python 3.13 /tmp/clean
+          VIRTUAL_ENV=/tmp/clean uv pip install dist/*.whl
+          cd /tmp
+          /tmp/clean/bin/amethyst convert \
+            "$GITHUB_WORKSPACE/tests/fixtures/kitchen-sink.md" \
+            -o /tmp/wheel.docx --toc --title-page --no-remote
+          test -s /tmp/wheel.docx
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/

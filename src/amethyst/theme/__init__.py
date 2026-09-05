@@ -391,6 +391,7 @@ def _number(value: Any) -> float | None:
 def _positive(
     data: dict[str, dict[str, Any]], section: str, key: str, source: str
 ) -> float:
+    """A number greater than zero: a size, a multiplier, a line height."""
     value = _value(data, section, key, source)
     number = _number(value)
     if number is None or number <= 0:
@@ -401,6 +402,7 @@ def _positive(
 def _weight(
     data: dict[str, dict[str, Any]], section: str, key: str, source: str
 ) -> int:
+    """A CSS font weight. Word wants one of these too, so the range is checked."""
     value = _value(data, section, key, source)
     if isinstance(value, bool) or not isinstance(value, int) or not 100 <= value <= 900:
         raise _invalid(section, key, source, "a font weight from 100 to 900", value)
@@ -410,6 +412,11 @@ def _weight(
 def _scale(
     data: dict[str, dict[str, Any]], section: str, key: str, source: str
 ) -> tuple[float, ...]:
+    """The heading scale: one multiplier per level, h1 first, none of them optional.
+
+    All six are required rather than defaulted, because a scale with a gap in
+    it is a theme that renders one heading level at body size and looks broken.
+    """
     value = _value(data, section, key, source)
     must = f"a list of {HEADING_LEVELS} positive numbers, h1 first"
     if not isinstance(value, list) or len(value) != HEADING_LEVELS:
@@ -421,6 +428,13 @@ def _scale(
 
 
 def _color(data: dict[str, dict[str, Any]], section: str, key: str, source: str) -> str:
+    """A hex colour, normalised to six lowercase digits.
+
+    Hex rather than any CSS notation, and normalised rather than passed
+    through, because the DOCX side needs a ``RGBColor`` — which takes six
+    digits and nothing else. Restricting it here means neither compiler has to
+    parse a colour.
+    """
     value = _value(data, section, key, source)
     if not isinstance(value, str) or not HEX_COLOR.match(value):
         raise _invalid(section, key, source, 'a hex colour like "#6a3fa0"', value)
@@ -433,6 +447,11 @@ def _color(data: dict[str, dict[str, Any]], section: str, key: str, source: str)
 def _families(
     data: dict[str, dict[str, Any]], section: str, key: str, source: str
 ) -> tuple[str, ...]:
+    """A font stack, most-preferred first, with nothing CSS-unsafe in a name.
+
+    The names are written into a stylesheet, so a family carrying a quote or a
+    semicolon could end the declaration and change what follows it.
+    """
     value = _value(data, section, key, source)
     must = "a list of font family names"
     if not isinstance(value, list) or not value:

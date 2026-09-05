@@ -410,6 +410,14 @@ def field_end() -> Any:
 
 
 def _field_char(kind: str, *, dirty: bool = False) -> Any:
+    """One of a field's three markers: ``begin``, ``separate`` or ``end``.
+
+    ``dirty`` is what makes Word evaluate the field when the file opens rather
+    than showing whatever result was written beside it — needed by ``PAGEREF``
+    and ``TOC``, and not by ``PAGE`` or ``STYLEREF``, which Word computes while
+    it lays the page out. It is not free: a document containing any dirty field
+    greets the reader with an update-fields dialog.
+    """
     run = OxmlElement("w:r")
     char = OxmlElement("w:fldChar")
     char.set(qn("w:fldCharType"), kind)
@@ -420,6 +428,7 @@ def _field_char(kind: str, *, dirty: bool = False) -> Any:
 
 
 def _instruction(instruction: str) -> Any:
+    """The run carrying a field's instruction text, spaces and all."""
     run = OxmlElement("w:r")
     text = OxmlElement("w:instrText")
     # Without this the leading and trailing spaces a field instruction needs
@@ -432,6 +441,7 @@ def _instruction(instruction: str) -> Any:
 
 
 def _text_run(content: str) -> Any:
+    """A plain run of text that keeps the whitespace it was given."""
     run = OxmlElement("w:r")
     text = OxmlElement("w:t")
     text.set(qn("xml:space"), "preserve")

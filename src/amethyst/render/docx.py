@@ -198,6 +198,7 @@ class _Builder:
     """One conversion. Not reused: the state below belongs to one document."""
 
     def __init__(self, document: Document, options: RenderOptions) -> None:
+        """Start an empty document with the theme already compiled into it."""
         self._document = document
         self._options = options
         self._theme = options.theme
@@ -263,6 +264,7 @@ class _Builder:
         properties.modified = now
 
     def _save(self) -> bytes:
+        """Serialise the finished document, without ever touching the disk."""
         buffer = io.BytesIO()
         try:
             self._docx.save(buffer)
@@ -465,6 +467,7 @@ class _Builder:
     # --- blocks ------------------------------------------------------------
 
     def _blocks(self, tokens: list[Token], start: int, end: int) -> None:
+        """Walk a run of block tokens, in order, until the end of the range."""
         index = start
         while index < end:
             index = self._block(tokens, index, end)
@@ -480,6 +483,7 @@ class _Builder:
         return handler(self, tokens, index, end)
 
     def _heading(self, tokens: list[Token], index: int, end: int) -> int:
+        """A heading, styled by level and bookmarked so the contents can link."""
         token = tokens[index]
         level = min(int(token.tag[1:]), len(HEADING_STYLES))
         paragraph = self._paragraph(HEADING_STYLES[level - 1])
@@ -492,6 +496,7 @@ class _Builder:
         return close + 1
 
     def _paragraph_block(self, tokens: list[Token], index: int, end: int) -> int:
+        """An ordinary paragraph, dropped again if nothing survived the walk."""
         close = _closing(tokens, index, end)
         paragraph = self._paragraph()
         self._inline_span(paragraph, tokens, index + 1, close)
@@ -503,6 +508,7 @@ class _Builder:
         return close + 1
 
     def _code(self, tokens: list[Token], index: int, _end: int) -> int:
+        """A fenced block: one shaded paragraph, highlighted run by run."""
         token = tokens[index]
         paragraph = self._paragraph(CODE_STYLE)
         background = self._highlighter.background
@@ -550,6 +556,8 @@ class _Builder:
             run.italic = True
 
     def _quote(self, tokens: list[Token], index: int, end: int) -> int:
+        """A blockquote, which is a depth rather than a container: what it holds
+        is ordinary blocks, indented by how many quotes are open around them."""
         close = _closing(tokens, index, end)
         self._quotes += 1
         self._blocks(tokens, index + 1, close)
@@ -557,6 +565,7 @@ class _Builder:
         return close + 1
 
     def _list(self, tokens: list[Token], index: int, end: int) -> int:
+        """A list, given a counter of its own so it does not continue the last."""
         token = tokens[index]
         close = _closing(tokens, index, end)
         ordered = token.type == "ordered_list_open"
@@ -583,6 +592,7 @@ class _Builder:
         return close + 1
 
     def _item(self, tokens: list[Token], index: int, end: int) -> int:
+        """One item, whose marker goes on the first paragraph inside it."""
         close = _closing(tokens, index, end)
         self._pending = self._lists[-1] if self._lists else None
         self._blocks(tokens, index + 1, close)
@@ -592,6 +602,7 @@ class _Builder:
         return close + 1
 
     def _rule(self, _tokens: list[Token], index: int, _end: int) -> int:
+        """A horizontal rule: an empty paragraph with a border underneath it."""
         paragraph = self._paragraph()
         set_borders(
             paragraph._p.get_or_add_pPr(), ["bottom"], color=self._theme.colors.rule
@@ -602,6 +613,7 @@ class _Builder:
         return index + 1
 
     def _term(self, tokens: list[Token], index: int, end: int) -> int:
+        """The term of a definition list, set bold above its definition."""
         close = _closing(tokens, index, end)
         paragraph = self._paragraph()
         self._inline_span(paragraph, tokens, index + 1, close, base=_Run(bold=True))
@@ -617,6 +629,7 @@ class _Builder:
         return close + 1
 
     def _html(self, tokens: list[Token], index: int, _end: int) -> int:
+        """A raw HTML block, which Word has no way to hold: skip it and warn."""
         self._skip_html(tokens[index])
         return index + 1
 
@@ -636,6 +649,7 @@ class _Builder:
         return close + 1
 
     def _footnote(self, tokens: list[Token], index: int, end: int) -> int:
+        """One footnote body, numbered to match the reference that points at it."""
         close = _closing(tokens, index, end)
         self._prefix = f"{_footnote_number(tokens[index])}. "
         self._blocks(tokens, index + 1, close)
@@ -645,6 +659,7 @@ class _Builder:
     # --- tables ------------------------------------------------------------
 
     def _table(self, tokens: list[Token], index: int, end: int) -> int:
+        """A GFM table, sized to its widest row and given a repeating header."""
         close = _closing(tokens, index, end)
         rows = _table_rows(tokens, index + 1, close)
         if not rows:
@@ -673,6 +688,7 @@ class _Builder:
     def _cell(
         self, cell: Any, content: Token | None, alignment: str | None, header: bool
     ) -> None:
+        """One cell: the column's alignment, and a fill if it is a header."""
         paragraph = cell.paragraphs[0]
         paragraph.style = self._docx.styles[TABLE_TEXT_STYLE]
         if alignment in ALIGNMENTS:
@@ -699,6 +715,9 @@ class _Builder:
                 self._inline(paragraph, tokens[index], base=base)
 
     def _inline(self, paragraph: Any, token: Token, *, base: _Run = _PLAIN) -> None:
+        """Walk one inline token into runs, carrying the formatting as it opens
+        and closes. Links are the awkward case: their runs are written into the
+        paragraph first and moved inside the hyperlink element on close."""
         style = base
         line = token.map[0] + 1 if token.map else None
         # Where each open link points, and the runs written since it opened,
@@ -780,6 +799,7 @@ class _Builder:
     def _close_link(
         self, paragraph: Any, collected: list[tuple[str, list[Any]]]
     ) -> None:
+        """Wrap the runs written since a link opened in the link itself."""
         if not collected:
             return
         href, elements = collected.pop()
@@ -798,6 +818,7 @@ class _Builder:
         line: int | None,
         collected: list[tuple[str, list[Any]]],
     ) -> None:
+        """An inline image, scaled to the text column, or a warning naming it."""
         source = token.attrGet("src")
         source = source if isinstance(source, str) else ""
         where = f" (line {line})" if line is not None else ""

@@ -191,6 +191,7 @@ def apply_theme(document: Any, theme: Theme, *, warn: Warn = _discard) -> None:
 
 
 def _body(document: Any, theme: Theme) -> None:
+    """``Normal``, which every other style inherits from — so it goes first."""
     style = document.styles[BODY_STYLE]
     _font(
         style, family(theme.fonts.body), size=theme.type.size, color=theme.colors.text
@@ -202,6 +203,7 @@ def _body(document: Any, theme: Theme) -> None:
 
 
 def _headings(document: Any, theme: Theme) -> None:
+    """``Heading 1``-``6``, at the theme's scale and in the theme's face."""
     heading_font = family(theme.fonts.heading)
     for level, (name, scale) in enumerate(
         zip(HEADING_STYLES, theme.type.headings, strict=True), start=1
@@ -244,6 +246,7 @@ def _lists(document: Any, theme: Theme) -> None:
 
 
 def _quote(document: Any, theme: Theme) -> None:
+    """``Quote``: muted, indented, and ruled down the left like the PDF's."""
     style = document.styles[QUOTE_STYLE]
     # Word's Quote is italic; the PDF's is not, and a blockquote holding a
     # paragraph of prose should not be set in italic for its whole length.
@@ -261,6 +264,7 @@ def _quote(document: Any, theme: Theme) -> None:
 
 
 def _code(document: Any, theme: Theme) -> None:
+    """The two code styles: a shaded, bordered block and an inline span."""
     block = _new_style(document, CODE_STYLE, WD_STYLE_TYPE.PARAGRAPH)
     _font(
         block,
@@ -298,6 +302,7 @@ def _tables(document: Any, theme: Theme) -> None:
 
 
 def _footnotes(document: Any, theme: Theme) -> None:
+    """The endnote-style list Word gets instead of real footnotes: small, muted."""
     style = _new_style(document, FOOTNOTE_STYLE, WD_STYLE_TYPE.PARAGRAPH)
     _font(
         style, family(theme.fonts.body), size=theme.type.small, color=theme.colors.muted
@@ -308,6 +313,7 @@ def _footnotes(document: Any, theme: Theme) -> None:
 
 
 def _links(document: Any, theme: Theme) -> None:
+    """``Hyperlink``, in the accent colour and without Word's underline."""
     # "Hyperlink" is a Word style name rather than one of ours, so it is
     # declared as built-in: Word applies it to a link the user types, and a
     # document with two spellings of the same idea in its style pane is worse
@@ -523,6 +529,7 @@ def length(value: str) -> Length | None:
 
 
 def _from_units(value: float, unit: str) -> Length:
+    """A CSS length in a known unit, as the EMU that Word measures in."""
     return Emu(round(value * EMU_PER_INCH / UNITS_PER_INCH[unit]))
 
 

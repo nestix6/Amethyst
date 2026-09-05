@@ -12,17 +12,6 @@ The point is output that looks deliberately typeset rather than printed from a
 browser: good defaults with no flags required, and a shared theme so the same
 source reads as the same document in both formats.
 
-## Start here
-
-**Read `.references/PLAN.md` at the start of every session.** It is the source
-of truth: architecture, environment setup, verified findings, known gotchas,
-and the phased build order. This file stays short on purpose — do not copy
-detail into it.
-
-`.references/` is gitignored and deliberately local-only, so it will be absent
-from a fresh clone. It is removed, along with this section, before the repo
-goes public.
-
 ## Commands
 
 The venv is Python 3.13 with all dependencies installed:
@@ -72,9 +61,3 @@ for i, page in enumerate(PdfReader('out.pdf').pages):
 "
 for f in page*.pdf; do sips -s format png "$f" --out "${f%.pdf}.png"; done
 ```
-
-## When the user asks to commit
-
-Before committing, update `.references/PLAN.md` to match the actual state of
-the project: tick off completed phases, record anything newly verified or
-disproved, and correct any decision the implementation changed.
