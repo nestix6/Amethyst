@@ -14,6 +14,10 @@ write, no reference `.docx` to maintain. The point is output that looks
 deliberately typeset rather than printed from a browser — and a shared theme,
 so the same source reads as the same document in both formats.
 
+This page is the quick tour. **[Full documentation](docs/documentation.md)**
+covers every option, the theme format, the configuration layers and the
+architecture.
+
 ---
 
 ## Install
