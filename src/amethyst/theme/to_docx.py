@@ -122,6 +122,13 @@ EMU_PER_INCH = 914400
 
 LENGTH = re.compile(r"\A([+-]?(?:\d+\.?\d*|\.\d+))([a-z]*)\Z")
 
+#: The four sides of the box a code block sits in, and the padding inside it
+#: in points. Named here rather than written into the style because the Word
+#: renderer redraws the same box when a dark highlighting style replaces the
+#: theme's fill, and a box that came back a different size would be visible.
+CODE_BOX_SIDES = ("top", "left", "bottom", "right")
+CODE_BOX_PADDING = 6
+
 #: What Word calls a font weight: there is only bold, so a theme's numeric
 #: weight is a threshold rather than a value.
 BOLD_AT = 600
@@ -268,7 +275,10 @@ def _code(document: Any, theme: Theme) -> None:
     properties = block.element.get_or_add_pPr()
     shade(properties, theme.colors.fill)
     set_borders(
-        properties, ["top", "left", "bottom", "right"], color=theme.colors.rule, space=6
+        properties,
+        CODE_BOX_SIDES,
+        color=theme.colors.rule,
+        space=CODE_BOX_PADDING,
     )
 
     inline = _new_style(document, CODE_INLINE_STYLE, WD_STYLE_TYPE.CHARACTER)

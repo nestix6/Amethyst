@@ -80,12 +80,17 @@ def render_pdf(document: Document, options: RenderOptions) -> RenderResult:
 def local_only_fetcher(weasyprint: Any) -> Any:
     """A fetcher that reads local files and never reaches the network.
 
-    Remote images are a documented feature and are not built yet. Until they
-    are, refusing the fetch beats making one: a conversion that silently
-    depends on the network is slow when it works and mystifying when it is
-    not. The refusal carries its own wording because WeasyPrint's — "URI uses
-    disallowed protocol" — reads like a security policy rather than a feature
-    that has not landed. Everything else unexpected is refused by protocol.
+    Remote images *are* downloaded — by :mod:`amethyst.remote`, as a step of
+    the conversion, before any of this runs — and by the time a document
+    reaches WeasyPrint every image it can have is a file on disk. So a URL
+    arriving here is one that step could not get, or one it was told not to
+    fetch with ``--no-remote``, and rendering is the wrong moment to try
+    again: there is no cache, no timeout and no size limit down here, and a
+    conversion that quietly waits on the network is slow when it works and
+    mystifying when it does not. The refusal carries its own wording because
+    WeasyPrint's — "URI uses disallowed protocol" — reads like a security
+    policy rather than an image that is simply absent. Everything else
+    unexpected is refused by protocol.
 
     Subclassed inside the function because the base class arrives with the
     lazily imported module, and there is nothing to inherit from until then.
@@ -94,7 +99,7 @@ def local_only_fetcher(weasyprint: Any) -> Any:
     class LocalOnlyFetcher(weasyprint.URLFetcher):  # type: ignore[misc, name-defined]
         def fetch(self, url: str, headers: Any = None) -> Any:
             if urlsplit(url).scheme in REMOTE_SCHEMES:
-                raise ValueError("remote resources are not downloaded yet")
+                raise ValueError("this image was not downloaded")
             return super().fetch(url, headers)
 
     return LocalOnlyFetcher(allowed_protocols=LOCAL_PROTOCOLS)

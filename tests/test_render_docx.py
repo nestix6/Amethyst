@@ -119,12 +119,21 @@ def test_the_theme_compiler_can_be_imported_before_anything_else():
     here happens to import ``amethyst.render`` first, which enters the ring
     where it closes, so the suite could not see it. A subprocess can.
     """
-    result = subprocess.run(
-        [sys.executable, "-c", "import amethyst.theme.to_docx"],
-        capture_output=True,
-        text=True,
-    )
-    assert result.returncode == 0, result.stderr
+    for module in (
+        "amethyst.theme.to_docx",
+        # Phase 7's additions, which reach across the same layers: the config
+        # layer reads the theme layer and the render layer, and the fetcher
+        # reads the parse layer and the render layer.
+        "amethyst.config",
+        "amethyst.remote",
+        "amethyst.render.highlight",
+    ):
+        result = subprocess.run(
+            [sys.executable, "-c", f"import {module}"],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0, f"{module}: {result.stderr}"
 
 
 # --- the theme, compiled to styles ----------------------------------------
@@ -528,9 +537,70 @@ def test_a_local_image_is_embedded_and_fitted_to_the_column(kitchen_sink):
     assert document.inline_shapes[0].width <= column
 
 
+def test_a_fenced_block_with_a_language_is_coloured():
+    document = convert("```python\ndef f(x):\n    return x\n```\n")
+    (block,) = [p for p in document.paragraphs if p.style.name == CODE_STYLE]
+    colors = {str(run.font.color.rgb) for run in block.runs if run.font.color.rgb}
+    assert len(block.runs) > 1
+    assert colors
+    assert block.text.startswith("def f(x):")
+
+
+def test_a_fenced_block_with_no_language_is_one_plain_run():
+    document = convert("```\n$ amethyst convert notes.md\n```\n")
+    (block,) = [p for p in document.paragraphs if p.style.name == CODE_STYLE]
+    (run,) = block.runs
+    assert run.font.color.rgb is None
+
+
+def test_highlighting_off_leaves_every_block_one_plain_run():
+    document = convert("```python\ndef f(x): return x\n```\n", highlight_style="none")
+    (block,) = [p for p in document.paragraphs if p.style.name == CODE_STYLE]
+    (run,) = block.runs
+    assert run.font.color.rgb is None
+
+
+def test_a_dark_style_shades_every_code_block_not_only_the_coloured_ones():
+    """A light box a paragraph away from a dark one is the drift to avoid."""
+    document = convert(
+        "```python\ndef f(): pass\n```\n\n```\nplain text\n```\n",
+        highlight_style="monokai",
+    )
+    blocks = [p for p in document.paragraphs if p.style.name == CODE_STYLE]
+    assert len(blocks) == 2
+    for block in blocks:
+        shading = block._p.get_or_add_pPr().find(qn("w:shd"))
+        assert shading is not None
+        assert shading.get(qn("w:fill")) == "272822"
+        assert all(run.font.color.rgb is not None for run in block.runs)
+
+
+def test_a_truncated_image_warns_rather_than_raising(tmp_path, fixtures):
+    """A dropped download leaves half a file, so this path is now reachable."""
+    whole = (fixtures / "assets" / "amethyst.png").read_bytes()
+    (tmp_path / "half.png").write_bytes(whole[: len(whole) // 2])
+    collected: list[str] = []
+    render_docx(
+        Document.from_markdown("![a](half.png)\n", base_dir=tmp_path),
+        RenderOptions(warn=collected.append),
+    )
+    assert any("damaged" in message for message in collected)
+
+
+def test_a_file_that_is_not_an_image_at_all_warns_too(tmp_path):
+    (tmp_path / "nope.png").write_text("this is prose", encoding="utf-8")
+    collected: list[str] = []
+    render_docx(
+        Document.from_markdown("![a](nope.png)\n", base_dir=tmp_path),
+        RenderOptions(warn=collected.append),
+    )
+    assert any("image skipped" in message for message in collected)
+
+
 def test_a_remote_image_is_reported_rather_than_fetched():
+    """The walker never fetches: by here, an image is a local file or absent."""
     messages = warnings_from("![x](https://example.com/x.png)\n")
-    assert any("not downloaded yet" in message for message in messages)
+    assert any("not available locally" in message for message in messages)
 
 
 def test_an_image_that_is_not_there_leaves_no_empty_paragraph(tmp_path):

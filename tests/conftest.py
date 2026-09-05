@@ -61,6 +61,42 @@ def kitchen_sink() -> Path:
     return FIXTURES / "kitchen-sink.md"
 
 
+@pytest.fixture(autouse=True)
+def offline(monkeypatch, tmp_path: Path) -> None:
+    """Keep the whole suite off the network, and out of the real cache.
+
+    Amethyst downloads remote images now, and the kitchen-sink fixture links
+    one — so without this, running the tests would make a request per
+    conversion. Opening a URL raises instead, loudly: a test that means to
+    fetch something says so by patching this back out, and one that does not
+    fails rather than quietly waiting on a socket.
+
+    The cache is moved into the test's own directory for the same reason. A
+    suite that wrote into ``~/.cache`` would pass on the second run for a
+    reason that had nothing to do with the code.
+    """
+
+    def refuse(*args: object, **kwargs: object) -> None:
+        raise AssertionError("the test suite must not open a network connection")
+
+    monkeypatch.setattr("amethyst.remote.urlopen", refuse)
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
+
+
+@pytest.fixture(autouse=True)
+def config_home(monkeypatch, tmp_path: Path) -> Path:
+    """An empty per-user config directory, so the real one is never read.
+
+    Whatever is in ``~/.config/amethyst`` on the machine running the tests is
+    none of the suite's business, and would silently change what a conversion
+    resolves to. Autouse for that reason; a test that wants to *write* a user
+    config asks for it by name and gets the same directory.
+    """
+    home = tmp_path / "config-home"
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(home))
+    return home
+
+
 @pytest.fixture
 def write_md(tmp_path: Path):
     """Write a Markdown file into a temporary directory and return its path."""

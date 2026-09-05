@@ -34,6 +34,14 @@ class InputError(AmethystError):
     """The source document could not be read or parsed."""
 
 
+class ConfigError(AmethystError):
+    """A config file, or a document's frontmatter, said something unusable.
+
+    A conversion failure rather than bad usage, for the same reason a broken
+    theme is: the invocation was fine, and a file it read was not.
+    """
+
+
 class ThemeError(AmethystError):
     """A theme was located but could not be read or validated.
 

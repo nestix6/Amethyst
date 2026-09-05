@@ -62,6 +62,30 @@ def test_every_builtin_theme_loads():
         assert isinstance(load_theme(name), Theme)
 
 
+def test_the_three_shipped_themes_are_all_there():
+    assert set(builtin_names()) == {"academic", DEFAULT_THEME, "github"}
+
+
+def test_every_builtin_describes_itself_and_names_a_generic_last():
+    """`themes list` reads the description, and a font stack needs a floor."""
+    for name in builtin_names():
+        theme = load_theme(name)
+        assert theme.description, name
+        for stack in (theme.fonts.body, theme.fonts.heading, theme.fonts.mono):
+            assert stack[-1] in {"serif", "sans-serif", "monospace"}, name
+
+
+def test_a_builtin_declares_everything_rather_than_inheriting_it():
+    """A shipped theme is a worked example, so it should be readable whole."""
+    defaults = load_theme(DEFAULT_THEME)
+    for name in builtin_names():
+        theme = load_theme(name)
+        if name == DEFAULT_THEME:
+            continue
+        # Different from the default in the ways that make it a theme at all.
+        assert (theme.colors, theme.type) != (defaults.colors, defaults.type), name
+
+
 def test_the_default_theme_is_read_once_and_shared():
     assert default_theme() is default_theme()
 

@@ -41,7 +41,11 @@ from urllib.parse import unquote, urlsplit
 from docx import Document as new_docx
 from docx.enum.section import WD_SECTION
 from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_TAB_ALIGNMENT
-from docx.image.exceptions import UnrecognizedImageError
+from docx.image.exceptions import (
+    InvalidImageStreamError,
+    UnexpectedEndOfFileError,
+    UnrecognizedImageError,
+)
 from docx.oxml.ns import qn
 from docx.shared import Emu, Length, Pt
 from markdown_it.token import Token
@@ -70,9 +74,12 @@ from amethyst.render.furniture import (
     outline_depth,
     section_level,
 )
+from amethyst.render.highlight import Highlighter, Span
 from amethyst.theme.to_docx import (
     BODY_STYLE,
     BULLET_STYLES,
+    CODE_BOX_PADDING,
+    CODE_BOX_SIDES,
     CODE_INLINE_STYLE,
     CODE_STYLE,
     COVER_DATE_STYLE,
@@ -97,6 +104,18 @@ from amethyst.theme.to_docx import (
     quote_indent,
     rgb,
     text_width,
+)
+
+#: python-docx's three ways of saying "that is not a picture I can embed".
+#: They share no base class, so all three have to be named — and all three are
+#: reachable from a document: a file that is not an image, one that is an image
+#: format Word has no part type for, and one that was cut off. The last is why
+#: this matters more since images are downloaded: a truncated file is what a
+#: dropped connection leaves behind.
+UNUSABLE_IMAGE = (
+    InvalidImageStreamError,
+    UnexpectedEndOfFileError,
+    UnrecognizedImageError,
 )
 
 #: What a task list item is printed as. Word has real checkbox controls, but
@@ -184,6 +203,7 @@ class _Builder:
         self._theme = options.theme
         self._warn = options.warn
         self._docx = new_docx()
+        self._highlighter = Highlighter(options.highlight_style, warn=self._warn)
         apply_theme(self._docx, self._theme, warn=self._warn)
 
         self._lists: list[_ListLevel] = []
@@ -483,12 +503,51 @@ class _Builder:
         return close + 1
 
     def _code(self, tokens: list[Token], index: int, _end: int) -> int:
+        token = tokens[index]
         paragraph = self._paragraph(CODE_STYLE)
+        background = self._highlighter.background
+        if background is not None:
+            # A dark highlighting style is a panel of its own, and every code
+            # block in the document is one — including the blocks it could not
+            # colour, which would otherwise be the theme's light box a
+            # paragraph away from a dark one. The stylesheet says the same
+            # thing with a bare `pre` rule.
+            properties = paragraph._p.get_or_add_pPr()
+            shade(properties, background)
+            set_borders(
+                properties,
+                CODE_BOX_SIDES,
+                color=background,
+                space=CODE_BOX_PADDING,
+            )
+        # `info` is what was written after the fence — the language, and
+        # anything else on the line, which nothing here reads. An indented
+        # block has no info at all, and so is never highlighted.
+        language = (token.info or "").split(maxsplit=1)
+        spans = self._highlighter.spans(token.content, language[0] if language else "")
+        if spans is None:
+            spans = [
+                Span(
+                    text=token.content.rstrip("\n"),
+                    color=self._highlighter.foreground,
+                )
+            ]
+        for span in spans:
+            self._span(paragraph, span)
+        return index + 1
+
+    def _span(self, paragraph: Any, span: Span) -> None:
+        """One coloured run of code, inside the paragraph holding the block."""
         run = paragraph.add_run()
         # The setter turns each newline into a line break rather than a new
-        # paragraph, which is what keeps one fenced block inside one shaded box.
-        run.text = tokens[index].content.rstrip("\n")
-        return index + 1
+        # paragraph, which keeps one fenced block inside one shaded box.
+        run.text = span.text
+        if span.color is not None:
+            run.font.color.rgb = rgb(span.color)
+        if span.bold:
+            run.bold = True
+        if span.italic:
+            run.italic = True
 
     def _quote(self, tokens: list[Token], index: int, end: int) -> int:
         close = _closing(tokens, index, end)
@@ -743,7 +802,7 @@ class _Builder:
         source = source if isinstance(source, str) else ""
         where = f" (line {line})" if line is not None else ""
         if urlsplit(source).scheme in REMOTE_SCHEMES:
-            self._warn(f"remote images are not downloaded yet: {source}{where}")
+            self._warn(f"remote image not available locally: {source}{where}")
             return
 
         path = Path(unquote(urlsplit(source).path))
@@ -752,13 +811,8 @@ class _Builder:
         run = paragraph.add_run()
         try:
             picture = run.add_picture(str(path))
-        except (OSError, ValueError, UnrecognizedImageError) as exc:
-            detail = (
-                "it could not be read"
-                if isinstance(exc, OSError)
-                else "Word has no way to hold that image"
-            )
-            self._warn(f"image skipped: {source}{where} — {detail}.")
+        except (OSError, ValueError, *UNUSABLE_IMAGE) as exc:
+            self._warn(f"image skipped: {source}{where} — {_why_unusable(exc)}.")
             run._r.getparent().remove(run._r)
             return
         _fit(picture, self._column_width())
@@ -936,6 +990,15 @@ def _table_rows(
                 )
             )
     return rows
+
+
+def _why_unusable(exc: BaseException) -> str:
+    """Why an image could not be embedded, in the words a person would use."""
+    if isinstance(exc, OSError):
+        return "it could not be read"
+    if isinstance(exc, InvalidImageStreamError | UnexpectedEndOfFileError):
+        return "the file is damaged, or is not the picture it claims to be"
+    return "Word has no way to hold that image"
 
 
 def _fit(picture: Any, available: Length | None) -> None:

@@ -365,10 +365,54 @@ def test_the_url_fetcher_refuses_the_network_without_touching_it(requires_weasyp
 
     fetcher = local_only_fetcher(weasyprint)
     for url in ("https://example.com/image.png", "http://example.com/image.png"):
-        with pytest.raises(ValueError, match="remote resources"):
+        with pytest.raises(ValueError, match="was not downloaded"):
             fetcher.fetch(url)
     with pytest.raises(ValueError, match="disallowed protocol"):
         fetcher.fetch("ftp://example.com/image.png")
+
+
+# --- syntax highlighting --------------------------------------------------
+
+
+def test_a_fence_with_a_language_is_coloured_and_the_rules_are_inlined():
+    html = render_html(parse("```python\ndef f():\n    pass\n```\n"), RenderOptions())
+    assert '<span class="k">def</span>' in body_of(html)
+    # The colour has to be in the page too: nothing else is loaded.
+    assert "pre .k {" in html
+
+
+def test_a_fence_with_no_language_keeps_its_code_escaped():
+    html = render_html(parse("```\nnot <code> at all\n```\n"), RenderOptions())
+    assert "not &lt;code&gt; at all" in body_of(html)
+    assert "<span" not in body_of(html).split("<pre>")[1].split("</pre>")[0]
+
+
+def test_highlighting_can_be_turned_off_entirely():
+    options = RenderOptions(highlight_style="none")
+    html = render_html(parse("```python\ndef f(): pass\n```\n"), options)
+    assert "<span" not in body_of(html)
+    assert "pre .k" not in html
+
+
+def test_a_dark_style_repaints_the_block_after_the_theme_has_had_its_say():
+    """Both declare `pre`; the later rule wins, so order is the whole fix."""
+    html = render_html(
+        parse("```python\ndef f(): pass\n```\n"),
+        RenderOptions(highlight_style="monokai"),
+    )
+    assert html.index("--color-fill") < html.index("background: #272822")
+
+
+def test_a_highlighted_document_renders_without_a_weasyprint_warning(
+    requires_weasyprint,
+):
+    """The one rule for generated CSS: nothing WeasyPrint complains about."""
+    messages: list[str] = []
+    render_pdf(
+        parse("```python\ndef f(x):\n    return x\n```\n"),
+        RenderOptions(highlight_style="monokai", warn=messages.append),
+    )
+    assert messages == []
 
 
 # --- the furniture, on the page -------------------------------------------

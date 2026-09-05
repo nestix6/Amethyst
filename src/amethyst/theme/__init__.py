@@ -181,7 +181,7 @@ def locate_theme(source: str) -> str:
     theme that is found but will not parse raises ``ThemeError`` when it is
     read. The two are different mistakes and get different exit codes.
     """
-    if _is_path(source):
+    if is_theme_path(source):
         if not Path(source).is_file():
             raise UsageError(f"No theme file at {source}.")
         return source
@@ -197,7 +197,7 @@ def locate_theme(source: str) -> str:
 def read_theme_text(source: str) -> str:
     """Return a theme's TOML as written, for showing or copying."""
     locate_theme(source)
-    if _is_path(source):
+    if is_theme_path(source):
         return _read_file(Path(source))
     return _read_builtin(source)
 
@@ -225,12 +225,15 @@ def default_theme() -> Theme:
 # --- locating and reading -------------------------------------------------
 
 
-def _is_path(source: str) -> bool:
+def is_theme_path(source: str) -> bool:
     """Whether a theme was named as a file rather than as a builtin.
 
     A bare word is a builtin name; anything carrying a directory or a ``.toml``
     extension is a path. Written out so the check that a theme exists and the
-    read that follows it can never disagree about which one they are doing.
+    read that follows it can never disagree about which one they are doing —
+    and public, because the config layer has to resolve a declared theme path
+    against the file that declared it, and must agree about which ones those
+    are.
     """
     candidate = Path(source)
     return candidate.suffix.lower() == ".toml" or candidate.parent != Path(".")
@@ -464,6 +467,7 @@ __all__ = [
     "base_css",
     "builtin_names",
     "default_theme",
+    "is_theme_path",
     "load_theme",
     "locate_theme",
     "read_theme_text",

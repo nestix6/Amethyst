@@ -22,6 +22,12 @@ from amethyst.theme import Theme, default_theme
 #: opinion about where output goes or whether --quiet was passed.
 Warn = Callable[[str], None]
 
+#: The Pygments style a document is highlighted with when the user names none.
+#: It lives here rather than with the highlighter because it is the default of
+#: an option declared below, and :mod:`amethyst.render.highlight` reads it back
+#: from here so that there is one spelling of it.
+DEFAULT_HIGHLIGHT_STYLE = "default"
+
 
 def discard(message: str) -> None:
     """The default warning sink, for callers that do not want to hear it."""
@@ -49,6 +55,11 @@ class RenderOptions:
     toc_depth: int = 3
     #: Whether to open the document with a title page built from frontmatter.
     title_page: bool = False
+    #: The Pygments style code is coloured with, or ``"none"`` for no colour.
+    #: Held as a name rather than as a built highlighter because a renderer
+    #: needs one of its own anyway: a highlighter remembers what it has already
+    #: warned about, and that is per conversion.
+    highlight_style: str = DEFAULT_HIGHLIGHT_STYLE
     warn: Warn = discard
 
 

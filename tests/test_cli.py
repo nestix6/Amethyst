@@ -25,6 +25,7 @@ from amethyst.cli import (
     resolve_output,
     resolve_theme,
 )
+from amethyst.config import CONFIG_FILENAME, user_config_path
 from amethyst.errors import UsageError
 from amethyst.render.furniture import CONTENTS_HEADING
 from amethyst.theme import DEFAULT_THEME, builtin_names, load_theme
@@ -337,27 +338,31 @@ def test_a_successful_conversion_says_what_it_wrote(
 # --- flags that are accepted but not honoured yet --------------------------
 
 
-def test_an_unbuilt_flag_says_so_rather_than_being_ignored(
-    monkeypatch, doc, capsys, requires_weasyprint
+def test_a_named_style_reaches_the_document(
+    monkeypatch, doc, tmp_path, capsys, requires_weasyprint
 ):
+    """Every flag the CLI accepts is honoured; none is merely tolerated."""
+    out = tmp_path / "out.pdf"
     code = run(
         monkeypatch,
         "convert",
         str(doc),
         "-o",
-        "out.pdf",
+        str(out),
         "--highlight-style",
         "monokai",
     )
     assert code == 0
-    assert "--highlight-style is not implemented yet" in capsys.readouterr().err
+    assert "not implemented" not in capsys.readouterr().err
+    assert out.is_file()
 
 
-def test_the_default_style_passes_without_comment(
-    monkeypatch, doc, capsys, requires_weasyprint
-):
-    assert run(monkeypatch, "convert", str(doc), "-o", "out.pdf") == 0
-    assert "not implemented yet" not in capsys.readouterr().err
+def test_a_style_that_does_not_exist_is_bad_usage(monkeypatch, doc, capsys):
+    code = run(
+        monkeypatch, "convert", str(doc), "-f", "docx", "--highlight-style", "nope"
+    )
+    assert code == 2
+    assert "Unknown highlighting style" in capsys.readouterr().err
 
 
 # --- themes, once they are loaded -----------------------------------------
@@ -463,3 +468,175 @@ def test_a_toc_depth_past_the_last_heading_level_is_bad_usage(monkeypatch, doc):
     assert (
         run(monkeypatch, "convert", str(doc), "-o", "out.pdf", "--toc-depth", "7") == 2
     )
+
+
+# --- config files ---------------------------------------------------------
+
+
+def test_a_config_file_in_the_directory_changes_the_conversion(
+    monkeypatch, doc, tmp_path, capsys
+):
+    (tmp_path / CONFIG_FILENAME).write_text('theme = "github"\n', encoding="utf-8")
+    assert run(monkeypatch, "convert", str(doc), "-f", "docx", "--verbose") == 0
+    assert "github" in capsys.readouterr().out
+
+
+def test_a_flag_beats_the_config_file(monkeypatch, doc, tmp_path, capsys):
+    (tmp_path / CONFIG_FILENAME).write_text('theme = "github"\n', encoding="utf-8")
+    code = run(
+        monkeypatch, "convert", str(doc), "-f", "docx", "-t", "academic", "--verbose"
+    )
+    assert code == 0
+    assert "academic" in capsys.readouterr().out
+
+
+def test_a_flag_left_alone_does_not_overrule_the_config_file(
+    monkeypatch, doc, tmp_path, capsys
+):
+    """The trap this whole mechanism exists to avoid: a default that wins."""
+    (tmp_path / CONFIG_FILENAME).write_text("toc = true\ntoc_depth = 2\n", "utf-8")
+    assert run(monkeypatch, "convert", str(doc), "-f", "docx", "--verbose") == 0
+    assert "depth 2" in capsys.readouterr().out
+
+
+def test_the_project_file_beats_the_user_file(
+    monkeypatch, doc, tmp_path, capsys, config_home
+):
+    path = user_config_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text('theme = "github"\n', encoding="utf-8")
+    (tmp_path / CONFIG_FILENAME).write_text('theme = "academic"\n', encoding="utf-8")
+    assert run(monkeypatch, "convert", str(doc), "-f", "docx", "--verbose") == 0
+    assert "academic" in capsys.readouterr().out
+
+
+def test_frontmatter_can_ask_for_a_contents(monkeypatch, tmp_path, capsys):
+    source = tmp_path / "notes.md"
+    source.write_text("---\ntitle: T\ntoc: true\n---\n\n# One\n\n## Two\n", "utf-8")
+    assert run(monkeypatch, "convert", str(source), "-f", "docx", "--verbose") == 0
+    out = capsys.readouterr().out
+    assert "depth 3" in out
+
+
+def test_a_config_file_can_choose_the_format(monkeypatch, doc, tmp_path):
+    (tmp_path / CONFIG_FILENAME).write_text('format = "docx"\n', encoding="utf-8")
+    assert run(monkeypatch, "convert", str(doc)) == 0
+    assert doc.with_suffix(".docx").is_file()
+
+
+def test_an_output_extension_beats_a_configured_format(monkeypatch, doc, tmp_path):
+    """The config is the most general statement; -o is about this invocation."""
+    (tmp_path / CONFIG_FILENAME).write_text('format = "pdf"\n', encoding="utf-8")
+    out = tmp_path / "out.docx"
+    assert run(monkeypatch, "convert", str(doc), "-o", str(out)) == 0
+    assert out.is_file()
+    assert read_docx(str(out)).paragraphs
+
+
+def test_a_broken_config_file_is_a_conversion_failure_not_bad_usage(
+    monkeypatch, doc, tmp_path, capsys
+):
+    (tmp_path / CONFIG_FILENAME).write_text("theme = [\n", encoding="utf-8")
+    assert run(monkeypatch, "convert", str(doc), "-f", "docx") == 1
+    assert "not valid TOML" in capsys.readouterr().err
+
+
+def test_a_misspelled_setting_names_itself(monkeypatch, doc, tmp_path, capsys):
+    (tmp_path / CONFIG_FILENAME).write_text("tocdepth = 2\n", encoding="utf-8")
+    assert run(monkeypatch, "convert", str(doc), "-f", "docx") == 1
+    assert "unknown setting 'tocdepth'" in capsys.readouterr().err
+
+
+# --- init -----------------------------------------------------------------
+
+
+def test_init_writes_a_config_file_that_reads_back(monkeypatch, tmp_path, capsys):
+    assert run(monkeypatch, "init") == 0
+    written = tmp_path / CONFIG_FILENAME
+    assert written.is_file()
+    assert "amethyst.toml" in capsys.readouterr().out
+    # Every line is commented out, so writing it changes nothing.
+    assert "theme" in written.read_text(encoding="utf-8")
+
+
+def test_init_leaves_an_existing_file_alone(monkeypatch, tmp_path, capsys):
+    existing = tmp_path / CONFIG_FILENAME
+    existing.write_text('theme = "github"\n', encoding="utf-8")
+    assert run(monkeypatch, "init") == 2
+    assert existing.read_text(encoding="utf-8") == 'theme = "github"\n'
+    assert "already exists" in capsys.readouterr().err
+
+
+def test_a_file_written_by_init_is_read_by_convert(monkeypatch, doc, tmp_path, capsys):
+    """The two commands have to agree about the file, or init is decoration."""
+    assert run(monkeypatch, "init") == 0
+    written = tmp_path / CONFIG_FILENAME
+    written.write_text(
+        written.read_text(encoding="utf-8").replace(
+            '# theme = "default"', 'theme = "github"'
+        ),
+        encoding="utf-8",
+    )
+    capsys.readouterr()
+    assert run(monkeypatch, "convert", str(doc), "-f", "docx", "--verbose") == 0
+    assert "github" in capsys.readouterr().out
+
+
+# --- remote images --------------------------------------------------------
+
+
+def test_no_remote_leaves_a_linked_image_alone(monkeypatch, tmp_path, capsys):
+    """The suite's offline fixture is the assertion: a fetch would raise."""
+    source = tmp_path / "notes.md"
+    source.write_text("![a](https://example.com/x.png)\n", encoding="utf-8")
+    assert run(monkeypatch, "convert", str(source), "-f", "docx", "--no-remote") == 0
+    assert "not available locally" in capsys.readouterr().err
+
+
+def test_remote_images_are_fetched_by_default(monkeypatch, tmp_path, fixtures):
+    calls: list[str] = []
+    png = (fixtures / "assets" / "amethyst.png").read_bytes()
+
+    class Response(io.BytesIO):
+        headers = {"Content-Type": "image/png"}
+
+        def geturl(self) -> str:
+            return "https://example.com/x.png"
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            self.close()
+
+    def urlopen(request, timeout=None):
+        calls.append(request.full_url)
+        return Response(png)
+
+    monkeypatch.setattr("amethyst.remote.urlopen", urlopen)
+    source = tmp_path / "notes.md"
+    source.write_text("![a](https://example.com/x.png)\n", encoding="utf-8")
+    assert run(monkeypatch, "convert", str(source), "-f", "docx") == 0
+    assert calls == ["https://example.com/x.png"]
+
+
+# --- the last line before a traceback -------------------------------------
+
+
+def test_an_unexpected_failure_is_a_line_and_not_a_traceback(monkeypatch, doc, capsys):
+    """A traceback is for a maintainer; --verbose is how one asks for it."""
+
+    def explode(*args: object, **kwargs: object):
+        raise RuntimeError("the flux capacitor let go")
+
+    monkeypatch.setattr(cli, "render_docx", explode)
+    assert run(monkeypatch, "convert", str(doc), "-f", "docx") == 1
+    captured = capsys.readouterr().err
+    assert "RuntimeError: the flux capacitor let go" in captured
+    assert "That is a bug in Amethyst" in captured
+    assert "Traceback" not in captured
+
+
+def test_a_usage_error_still_exits_two_and_not_one(monkeypatch, doc):
+    """The catch-all must not swallow the errors that have their own codes."""
+    assert run(monkeypatch, "convert", str(doc)) == 2

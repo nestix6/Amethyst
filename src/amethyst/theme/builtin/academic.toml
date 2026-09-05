@@ -1,0 +1,45 @@
+# A paper, a thesis chapter, a report meant to be read on paper.
+#
+# The two things that make a page look academic rather than merely printed are
+# a narrow measure and a quiet palette. Both are here: the margins are wide
+# enough to bring the line length down to something readable, and nothing on
+# the page is coloured except a link.
+
+description = "A quiet book serif, a narrow measure and generous margins."
+
+[fonts]
+# Charter is on macOS and in most Linux font packages; Cambria covers Windows
+# and Office. A heading in the same face as the text is the traditional choice
+# and the one that looks least like a slide.
+body = ["Charter", "Bitstream Charter", "Cambria", "Times New Roman", "serif"]
+heading = ["Charter", "Bitstream Charter", "Cambria", "Times New Roman", "serif"]
+mono = ["ui-monospace", "SF Mono", "Menlo", "DejaVu Sans Mono", "monospace"]
+
+[type]
+size = 11
+small = 9
+code = 0.82
+title = 2.2
+# Roomier than the default. A long document is read for an hour at a time.
+line_height = 1.55
+heading_weight = 700
+# Restrained: a section heading announces a section, it does not open a
+# chapter of its own.
+headings = [1.7, 1.35, 1.15, 1, 1, 1]
+
+[colors]
+text = "#111111"
+muted = "#555555"
+accent = "#20558a"
+rule = "#cccccc"
+fill = "#f4f4f4"
+
+[spacing]
+block = 0.8
+indent = 1.5
+
+[page]
+size = "A4"
+# Wide enough to bring an A4 line down to about 15cm, which is roughly the
+# 70 characters a page is comfortable to read at this size.
+margin = "2.5cm 3cm"

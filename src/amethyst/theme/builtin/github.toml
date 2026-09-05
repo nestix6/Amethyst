@@ -1,0 +1,44 @@
+# GitHub's Markdown look, set for paper.
+#
+# The web page it is modelled on is sans-serif, blue-linked and tightly ruled;
+# what changes here is the measure and the units, because a screen scrolls and
+# a page does not.
+
+description = "GitHub's Markdown look: system sans, blue links, quiet rules."
+
+[fonts]
+# GitHub asks for the reader's own system font first. That is spelled
+# `-apple-system` on the web, which is a keyword rather than a family and
+# means nothing to a PDF renderer or to Word, so the stack names the fonts
+# those actually resolve.
+body = ["Helvetica Neue", "Segoe UI", "Roboto", "Noto Sans", "Arial", "sans-serif"]
+heading = ["Helvetica Neue", "Segoe UI", "Roboto", "Noto Sans", "Arial", "sans-serif"]
+mono = ["SFMono-Regular", "SF Mono", "Menlo", "Consolas", "DejaVu Sans Mono", "monospace"]
+
+[type]
+# A shade smaller than the default theme: a sans face at the same size reads
+# larger than a serif one, and this one is set at GitHub's own 1.5 leading.
+size = 10.5
+small = 9
+code = 0.85
+title = 2.6
+line_height = 1.5
+heading_weight = 600
+# GitHub's own scale, which drops h5 and h6 below the body size rather than
+# leaving them level with it.
+headings = [2, 1.5, 1.25, 1, 0.875, 0.85]
+
+[colors]
+text = "#1f2328"
+muted = "#59636e"
+accent = "#0969da"
+rule = "#d1d9e0"
+fill = "#f6f8fa"
+
+[spacing]
+block = 1        # GitHub's paragraph gap is a full line
+indent = 1.8
+
+[page]
+size = "A4"
+margin = "2cm"

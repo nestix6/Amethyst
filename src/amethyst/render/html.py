@@ -21,6 +21,7 @@ from markdown_it.utils import EnvType, OptionsDict
 from amethyst.document import Document
 from amethyst.errors import RenderError
 from amethyst.parse import build_parser
+from amethyst.parse.markdown import Highlight
 from amethyst.render.base import RenderOptions
 from amethyst.render.furniture import (
     CONTENTS_HEADING,
@@ -28,6 +29,7 @@ from amethyst.render.furniture import (
     cover,
     section_level,
 )
+from amethyst.render.highlight import Highlighter
 from amethyst.theme import base_css
 from amethyst.theme.to_css import page_css, root_css
 
@@ -37,17 +39,21 @@ FALLBACK_TITLE = "Untitled"
 
 def render_html(document: Document, options: RenderOptions) -> str:
     """Render the document as one self-contained HTML page."""
+    # One highlighter for the whole page: it colours the code and it writes
+    # the rules that colour it, and those two have to be the same style.
+    highlighter = Highlighter(options.highlight_style, warn=options.warn)
+    sheets = stylesheets(document, options, highlighter)
     return "\n".join(
         [
             "<!DOCTYPE html>",
             '<html><head><meta charset="utf-8">',
             f"<title>{escape(document.title or FALLBACK_TITLE)}</title>",
             *meta_tags(document),
-            *(f"<style>\n{sheet}</style>" for sheet in stylesheets(document, options)),
+            *(f"<style>\n{sheet}</style>" for sheet in sheets),
             "</head>",
             "<body>",
             *front_matter(document, options),
-            render_body(document),
+            render_body(document, highlighter),
             "</body></html>",
             "",
         ]
@@ -141,15 +147,15 @@ def contents_html(document: Document, options: RenderOptions) -> list[str]:
     return lines
 
 
-def render_body(document: Document) -> str:
+def render_body(document: Document, highlighter: Highlighter | None = None) -> str:
     """Render just the token stream, with no page around it.
 
     The parser is rebuilt rather than kept on the document because its options
-    — ``xhtmlOut``, the ``language-`` class prefix — are part of how the tokens
-    are meant to be written out, and they belong with the one function that
-    declares them.
+    — ``xhtmlOut``, the ``language-`` class prefix, the highlighter — are part
+    of how the tokens are meant to be written out, and they belong with the one
+    function that declares them.
     """
-    md = build_parser()
+    md = build_parser(_fence_highlighter(highlighter))
     # The parser's renderer is the HTML one, which the protocol the attribute
     # is typed as does not say; the rules table is on the concrete class.
     renderer = cast(RendererHTML, md.renderer)
@@ -163,6 +169,22 @@ def render_body(document: Document) -> str:
     # from it is an optional id prefix for footnote anchors, which a
     # single-document pipeline has no use for.
     return renderer.render(document.tokens, md.options, {}).rstrip("\n")
+
+
+def _fence_highlighter(highlighter: Highlighter | None) -> Highlight | None:
+    """Adapt a highlighter to the three arguments markdown-it calls it with.
+
+    The third — whatever else was written on the fence line — is ignored:
+    markdown-it passes it along for the benefit of highlighters that take
+    options there, and nothing in this project reads one.
+    """
+    if highlighter is None or not highlighter.enabled:
+        return None
+
+    def highlight(code: str, language: str, _attrs: str) -> str | None:
+        return highlighter.html(code, language)
+
+    return highlight
 
 
 def _ordered_list_rule(renderer: RendererHTML) -> Callable[..., str]:
@@ -200,16 +222,25 @@ def _ordered_list_rule(renderer: RendererHTML) -> Callable[..., str]:
     return ordered_list_open
 
 
-def stylesheets(document: Document, options: RenderOptions) -> list[str]:
+def stylesheets(
+    document: Document,
+    options: RenderOptions,
+    highlighter: Highlighter | None = None,
+) -> list[str]:
     """The stylesheets to inline, in cascade order — last one wins.
 
     The theme goes after the structural sheet rather than before it: both
     declare ``:root``, both at the same specificity, so the one that wins is
-    simply the one that comes second.
+    simply the one that comes second. The highlighting comes after the theme
+    for the same reason: a dark style has to be able to take the code block's
+    background off the theme, and it says so with a rule of equal weight.
     """
+    if highlighter is None:
+        highlighter = Highlighter(options.highlight_style, warn=options.warn)
     sheets = [
         base_css(),
         root_css(options.theme),
+        highlighter.css(),
         page_css(
             options.theme,
             page_numbers=options.page_numbers,
