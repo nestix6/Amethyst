@@ -8,7 +8,7 @@ resolution-markers = [
 ]
 
 [[package]]
-name = "amethyst"
+name = "amethyst-cli"
 source = { editable = "." }
 dependencies = [
     { name = "linkify-it-py" },

@@ -25,10 +25,11 @@ architecture.
 Amethyst is a Python 3.10+ package. Install it as a tool:
 
 ```sh
-uv tool install amethyst
+uv tool install amethyst-cli
 ```
 
-or into an environment of your own with `pip install amethyst`.
+or into an environment of your own with `pip install amethyst-cli`. The
+package is `amethyst-cli`; the command it installs is `amethyst`.
 
 **The PDF path needs Pango**, which is a system library rather than a Python
 one. That is the only thing Amethyst cannot install for you:

@@ -35,14 +35,17 @@ This is the complete reference. For a five-minute introduction, read the
 Amethyst needs Python 3.10 or newer. It is tested on 3.10, 3.11, 3.12 and 3.13.
 
 ```sh
-uv tool install amethyst
+uv tool install amethyst-cli
 ```
 
 Or into an environment you manage yourself:
 
 ```sh
-pip install amethyst
+pip install amethyst-cli
 ```
+
+The command it installs is `amethyst`, and the import package is `amethyst`
+too — only the name you install differs.
 
 ### The one system dependency
 

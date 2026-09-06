@@ -3,7 +3,10 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "amethyst"
+# The distribution name does not match the import package, which stays
+# `amethyst`, so the version path and the wheel target below must both be
+# explicit: hatchling cannot infer either one from the name.
+name = "amethyst-cli"
 dynamic = ["version"]
 description = "Turn a Markdown file into a well-typeset PDF or Word document."
 readme = "README.md"
